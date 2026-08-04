@@ -1,7 +1,8 @@
 const VERSION_URL =
   'https://raw.githubusercontent.com/DiegoBerko/nutria-privacy/main/alchim-version.json';
 
-export const APP_VERSION = '1';
+import { APP_VERSION as CONFIG_VERSION } from '../config/version';
+export const APP_VERSION = CONFIG_VERSION;
 
 export interface VersionInfo {
   version: string;

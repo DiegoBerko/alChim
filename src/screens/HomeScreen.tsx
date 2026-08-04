@@ -1,5 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
+  Alert,
+  Linking,
   View,
   Text,
   StyleSheet,
@@ -11,6 +13,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { colors } from '../theme';
 import { storage } from '../services/storage';
+import { useUpdate } from '../context/UpdateContext';
 import type { WorkoutSession } from '../types';
 import type { MainTabParamList } from '../navigation/AppNavigator';
 
@@ -44,6 +47,7 @@ function SessionCard({ session }: { session: WorkoutSession }) {
 export default function HomeScreen() {
   const navigation = useNavigation<HomeNavProp>();
   const [recentSessions, setRecentSessions] = useState<WorkoutSession[]>([]);
+  const { updateInfo, clearUpdate } = useUpdate();
 
   useFocusEffect(
     useCallback(() => {
@@ -51,12 +55,30 @@ export default function HomeScreen() {
     }, []),
   );
 
+  function handleUpdate() {
+    if (!updateInfo) return;
+    Alert.alert(
+      'Nueva versión disponible',
+      `¿Descargar la actualización?${updateInfo.changelog ? `\n\n${updateInfo.changelog}` : ''}`,
+      [
+        { text: 'Ahora no', style: 'cancel', onPress: clearUpdate },
+        { text: 'Descargar', onPress: () => { Linking.openURL(updateInfo.url); clearUpdate(); } },
+      ],
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>alChim</Text>
         <Text style={styles.subtitle}>Tu diario de entrenamiento</Text>
       </View>
+
+      {updateInfo && (
+        <TouchableOpacity style={styles.updateBanner} onPress={handleUpdate} activeOpacity={0.8}>
+          <Text style={styles.updateBannerText}>🔄 Nueva versión disponible — tap para actualizar</Text>
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity
         style={styles.newSessionBtn}
@@ -107,6 +129,21 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
     marginTop: 2,
+  },
+  updateBanner: {
+    backgroundColor: '#1a2a1a',
+    borderWidth: 1,
+    borderColor: colors.success,
+    borderRadius: 8,
+    marginHorizontal: 20,
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  updateBannerText: {
+    color: colors.success,
+    fontSize: 13,
+    fontWeight: '600',
   },
   newSessionBtn: {
     backgroundColor: colors.accent,
