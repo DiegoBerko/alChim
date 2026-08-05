@@ -8,13 +8,15 @@ import {
   FlatList,
   TouchableOpacity,
   SafeAreaView,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { colors } from '../theme';
 import { storage } from '../services/storage';
 import { useUpdate } from '../context/UpdateContext';
-import type { WorkoutSession } from '../types';
+import type { WorkoutSession, SessionTemplate } from '../types';
 import type { MainTabParamList } from '../navigation/AppNavigator';
 
 type HomeNavProp = BottomTabNavigationProp<MainTabParamList, 'Inicio'>;
@@ -47,11 +49,14 @@ function SessionCard({ session }: { session: WorkoutSession }) {
 export default function HomeScreen() {
   const navigation = useNavigation<HomeNavProp>();
   const [recentSessions, setRecentSessions] = useState<WorkoutSession[]>([]);
+  const [templates, setTemplates] = useState<SessionTemplate[]>([]);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
   const { updateInfo, clearUpdate } = useUpdate();
 
   useFocusEffect(
     useCallback(() => {
       storage.getSessions().then(all => setRecentSessions(all.slice(0, 5)));
+      storage.getTemplates().then(setTemplates);
     }, []),
   );
 
@@ -65,6 +70,20 @@ export default function HomeScreen() {
         { text: 'Descargar', onPress: () => { Linking.openURL(updateInfo.url); clearUpdate(); } },
       ],
     );
+  }
+
+  function handleNewSession() {
+    if (templates.length === 0) {
+      navigation.navigate('Sesión');
+    } else {
+      setShowTemplateModal(true);
+    }
+  }
+
+  async function startWithTemplate(template: SessionTemplate | null) {
+    setShowTemplateModal(false);
+    await storage.setPendingTemplate(template);
+    navigation.navigate('Sesión');
   }
 
   return (
@@ -82,7 +101,7 @@ export default function HomeScreen() {
 
       <TouchableOpacity
         style={styles.newSessionBtn}
-        onPress={() => navigation.navigate('Sesión')}
+        onPress={handleNewSession}
         activeOpacity={0.8}>
         <Text style={styles.newSessionBtnText}>+ Nueva sesión</Text>
       </TouchableOpacity>
@@ -105,6 +124,47 @@ export default function HomeScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {/* Template picker modal */}
+      <Modal
+        visible={showTemplateModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowTemplateModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Iniciar sesión</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TouchableOpacity
+                style={styles.templateOption}
+                onPress={() => startWithTemplate(null)}
+                activeOpacity={0.8}>
+                <Text style={styles.templateOptionName}>Sesión vacía</Text>
+                <Text style={styles.templateOptionMeta}>Sin plantilla</Text>
+              </TouchableOpacity>
+
+              {templates.map(t => (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[styles.templateOption, styles.templateOptionFilled]}
+                  onPress={() => startWithTemplate(t)}
+                  activeOpacity={0.8}>
+                  <Text style={styles.templateOptionName}>{t.name}</Text>
+                  <Text style={styles.templateOptionMeta}>
+                    {t.exercises.length} ejercicio{t.exercises.length !== 1 ? 's' : ''}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.modalCancelBtn}
+              onPress={() => setShowTemplateModal(false)}>
+              <Text style={styles.modalCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -220,5 +280,54 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     paddingHorizontal: 32,
+  },
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'flex-end',
+  },
+  modalBox: {
+    backgroundColor: colors.surfaceElevated,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    maxHeight: '70%',
+  },
+  modalTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  templateOption: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 10,
+  },
+  templateOptionFilled: {
+    borderColor: colors.accent,
+  },
+  templateOptionName: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  templateOptionMeta: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 3,
+  },
+  modalCancelBtn: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  modalCancelText: {
+    color: colors.textSecondary,
+    fontSize: 15,
   },
 });

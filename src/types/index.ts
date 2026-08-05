@@ -54,4 +54,5 @@ export interface UserProfile {
   height: number; // cm
   weight: number; // kg
   bodyFatPct?: number; // %
+  groqKey?: string;
 }

@@ -6,6 +6,7 @@ const KEYS = {
   SESSIONS: 'alchim_sessions',
   EXERCISES: 'alchim_exercises',
   TEMPLATES: 'alchim_templates',
+  PENDING_TEMPLATE: 'alchim_pending_template',
 };
 
 const DEFAULT_EXERCISES: Exercise[] = [
@@ -219,6 +220,29 @@ export const storage = {
       );
     } catch (error) {
       console.error('Error deleting template:', error);
+    }
+  },
+
+  // ===== PENDING TEMPLATE =====
+  async setPendingTemplate(template: SessionTemplate | null): Promise<void> {
+    try {
+      if (template === null) {
+        await AsyncStorage.removeItem(KEYS.PENDING_TEMPLATE);
+      } else {
+        await AsyncStorage.setItem(KEYS.PENDING_TEMPLATE, JSON.stringify(template));
+      }
+    } catch (error) {
+      console.error('Error setting pending template:', error);
+    }
+  },
+
+  async getPendingTemplate(): Promise<SessionTemplate | null> {
+    try {
+      const json = await AsyncStorage.getItem(KEYS.PENDING_TEMPLATE);
+      return json ? JSON.parse(json) : null;
+    } catch (error) {
+      console.error('Error getting pending template:', error);
+      return null;
     }
   },
 };

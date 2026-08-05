@@ -151,6 +151,18 @@ export default function ProfileScreen() {
             placeholderTextColor={colors.textSecondary}
           />
 
+          <Text style={styles.label}>Clave Groq (para import PDF)</Text>
+          <TextInput
+            style={styles.input}
+            value={profile.groqKey ?? ''}
+            onChangeText={t => setProfile(p => ({ ...p, groqKey: t || undefined }))}
+            secureTextEntry={true}
+            placeholder="gsk_..."
+            placeholderTextColor={colors.textSecondary}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
           <TouchableOpacity
             style={[styles.saveBtn, saved && styles.saveBtnSuccess]}
             onPress={handleSave}

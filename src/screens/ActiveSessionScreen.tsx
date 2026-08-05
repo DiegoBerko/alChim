@@ -158,12 +158,42 @@ export default function ActiveSessionScreen() {
 
   // ─── Session control ────────────────────────────────────────────────────────
 
-  function startSession() {
-    setSessionStartTime(new Date().toISOString());
+  async function startSession() {
+    const startTime = new Date().toISOString();
+    setSessionStartTime(startTime);
     setSessionStarted(true);
     setElapsed(0);
-    setExercises([]);
     setSessionNotes('');
+
+    // Check for pending template
+    const pendingTemplate = await storage.getPendingTemplate();
+    if (pendingTemplate) {
+      await storage.setPendingTemplate(null);
+      const preloaded: ActiveExercise[] = pendingTemplate.exercises
+        .map(te => {
+          const libEx = allExercises.find(e => e.id === te.exerciseId);
+          if (!libEx) return null;
+          const numSets = te.targetSets > 0 ? te.targetSets : 3;
+          return {
+            exerciseId: libEx.id,
+            exerciseName: libEx.name,
+            met: libEx.met,
+            sets: Array.from({ length: numSets }, () => newSet()),
+            feedback: '',
+            effort: undefined,
+            expanded: false,
+          } as ActiveExercise;
+        })
+        .filter((e): e is ActiveExercise => e !== null);
+      if (preloaded.length > 0) {
+        preloaded[0] = { ...preloaded[0], expanded: true };
+        setExercises(preloaded);
+      } else {
+        setExercises([]);
+      }
+    } else {
+      setExercises([]);
+    }
   }
 
   function cancelSession() {

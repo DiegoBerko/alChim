@@ -10,17 +10,23 @@ import {
   Modal,
   SafeAreaView,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { colors } from '../theme';
 import { storage } from '../services/storage';
-import type { Exercise, ExerciseCategory } from '../types';
+import { parseWorkoutPDF } from '../services/groq';
+import type { Exercise, ExerciseCategory, SessionTemplate } from '../types';
+import type { ParsedWorkoutPlan } from '../services/groq';
 
 const CATEGORY_LABELS: Record<ExerciseCategory, string> = {
   fuerza: 'Fuerza',
   cardio: 'Cardio',
   peso_corporal: 'Peso corporal',
 };
+
+// ─── Exercise row ─────────────────────────────────────────────────────────────
 
 function ExerciseRow({
   exercise,
@@ -59,6 +65,76 @@ function ExerciseRow({
   );
 }
 
+// ─── Template row ─────────────────────────────────────────────────────────────
+
+function TemplateRow({
+  template,
+  onDelete,
+  onRename,
+}: {
+  template: SessionTemplate;
+  onDelete: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(template.name);
+
+  function confirmDelete() {
+    Alert.alert('Eliminar template', `¿Eliminar "${template.name}"?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: () => onDelete(template.id),
+      },
+    ]);
+  }
+
+  function finishRename() {
+    setEditing(false);
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== template.name) {
+      onRename(template.id, trimmed);
+    } else {
+      setName(template.name);
+    }
+  }
+
+  return (
+    <TouchableOpacity
+      style={styles.row}
+      onLongPress={confirmDelete}
+      activeOpacity={0.8}>
+      <View style={styles.rowMain}>
+        {editing ? (
+          <TextInput
+            style={styles.renameInput}
+            value={name}
+            onChangeText={setName}
+            onBlur={finishRename}
+            onSubmitEditing={finishRename}
+            autoFocus
+            returnKeyType="done"
+            placeholderTextColor={colors.textSecondary}
+          />
+        ) : (
+          <TouchableOpacity onPress={() => setEditing(true)}>
+            <Text style={styles.rowName}>{template.name}</Text>
+          </TouchableOpacity>
+        )}
+        <Text style={styles.rowMeta}>
+          {template.exercises.length} ejercicio{template.exercises.length !== 1 ? 's' : ''}
+        </Text>
+      </View>
+      <TouchableOpacity onPress={confirmDelete} style={styles.deleteBtn} hitSlop={8}>
+        <Text style={styles.deleteBtnText}>✕</Text>
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+}
+
+// ─── New exercise form ────────────────────────────────────────────────────────
+
 interface NewExerciseForm {
   name: string;
   category: ExerciseCategory;
@@ -73,23 +149,33 @@ const EMPTY_FORM: NewExerciseForm = {
   met: '4',
 };
 
+// ─── Main screen ──────────────────────────────────────────────────────────────
+
+type Tab = 'ejercicios' | 'templates';
+
 export default function ExercisesScreen() {
+  const [activeTab, setActiveTab] = useState<Tab>('ejercicios');
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [templates, setTemplates] = useState<SessionTemplate[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<NewExerciseForm>(EMPTY_FORM);
+  const [importing, setImporting] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       storage.getExercises().then(setExercises);
+      storage.getTemplates().then(setTemplates);
     }, []),
   );
 
-  async function handleDelete(id: string) {
+  // ─── Exercises ─────────────────────────────────────────────────────────────
+
+  async function handleDeleteExercise(id: string) {
     await storage.deleteExercise(id);
     setExercises(prev => prev.filter(e => e.id !== id));
   }
 
-  async function handleSave() {
+  async function handleSaveExercise() {
     if (!form.name.trim()) {
       Alert.alert('Error', 'El nombre es obligatorio.');
       return;
@@ -116,35 +202,212 @@ export default function ExercisesScreen() {
     setForm(EMPTY_FORM);
   }
 
+  // ─── Templates ─────────────────────────────────────────────────────────────
+
+  async function handleDeleteTemplate(id: string) {
+    await storage.deleteTemplate(id);
+    setTemplates(prev => prev.filter(t => t.id !== id));
+  }
+
+  async function handleRenameTemplate(id: string, name: string) {
+    const updated = templates.map(t => (t.id === id ? { ...t, name } : t));
+    const target = updated.find(t => t.id === id);
+    if (target) {
+      await storage.saveTemplate(target);
+    }
+    setTemplates(updated);
+  }
+
+  // ─── Import flow ────────────────────────────────────────────────────────────
+
+  async function handleImportFromImage() {
+    // Check groq key first
+    const profile = await storage.getProfile();
+    if (!profile?.groqKey) {
+      Alert.alert('Sin clave Groq', 'Configurá tu clave Groq en Perfil primero.');
+      return;
+    }
+    const groqKey = profile.groqKey;
+
+    launchImageLibrary({ mediaType: 'photo', includeBase64: true }, async response => {
+      if (response.didCancel || !response.assets?.length) {
+        return;
+      }
+      const asset = response.assets[0];
+      if (!asset.base64) {
+        Alert.alert('Error', 'No se pudo obtener la imagen en base64.');
+        return;
+      }
+
+      setImporting(true);
+      try {
+        const imageBase64 = asset.base64;
+        const mimeType = asset.type || 'image/jpeg';
+        const plan: ParsedWorkoutPlan = await parseWorkoutPDF({ imageBase64, mimeType, groqKey });
+
+        // Convert to SessionTemplate[]
+        const allExercises = await storage.getExercises();
+        const newTemplates: SessionTemplate[] = [];
+
+        for (const dia of plan.dias) {
+          const templateExercises: SessionTemplate['exercises'] = [];
+
+          for (const bloque of dia.bloques) {
+            for (const ej of bloque.ejercicios) {
+              // Try to find matching exercise by name (case-insensitive, partial)
+              const ejLower = ej.nombre.toLowerCase();
+              let found = allExercises.find(
+                e =>
+                  e.name.toLowerCase() === ejLower ||
+                  e.name.toLowerCase().includes(ejLower) ||
+                  ejLower.includes(e.name.toLowerCase()),
+              );
+
+              if (!found) {
+                // Create new exercise
+                const newEx: Exercise = {
+                  id: `ex_imported_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                  name: ej.nombre,
+                  muscleGroups: [],
+                  category: 'fuerza',
+                  met: 4,
+                };
+                await storage.saveExercise(newEx);
+                allExercises.push(newEx);
+                found = newEx;
+              }
+
+              templateExercises.push({
+                exerciseId: found.id,
+                exerciseName: found.name,
+                targetSets: typeof ej.series === 'number' ? ej.series : parseInt(String(ej.series), 10) || 3,
+                targetReps: ej.reps ?? '',
+              });
+            }
+          }
+
+          const template: SessionTemplate = {
+            id: `tmpl_${Date.now()}_${dia.nombre.replace(/\s+/g, '_')}`,
+            name: dia.nombre.replace('Dia', 'Día'),
+            exercises: templateExercises,
+          };
+          await storage.saveTemplate(template);
+          newTemplates.push(template);
+        }
+
+        const updated = await storage.getTemplates();
+        setTemplates(updated);
+        setActiveTab('templates');
+
+        const names = newTemplates.map(t => t.name).join(', ');
+        Alert.alert('Importación exitosa', `Se importaron ${newTemplates.length} templates: ${names}`);
+      } catch (err) {
+        Alert.alert('Error al importar', String(err));
+      } finally {
+        setImporting(false);
+      }
+    });
+  }
+
   const categories: ExerciseCategory[] = ['fuerza', 'cardio', 'peso_corporal'];
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Loading overlay */}
+      <Modal visible={importing} transparent animationType="fade">
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Text style={styles.loadingText}>Analizando imagen con IA...</Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Ejercicios</Text>
+        {activeTab === 'ejercicios' && (
+          <TouchableOpacity
+            style={styles.addBtn}
+            onPress={() => setShowModal(true)}
+            activeOpacity={0.8}>
+            <Text style={styles.addBtnText}>+ Agregar</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Segmented control */}
+      <View style={styles.segmentedControl}>
         <TouchableOpacity
-          style={styles.addBtn}
-          onPress={() => setShowModal(true)}
+          style={[styles.segment, activeTab === 'ejercicios' && styles.segmentActive]}
+          onPress={() => setActiveTab('ejercicios')}
           activeOpacity={0.8}>
-          <Text style={styles.addBtnText}>+ Agregar</Text>
+          <Text style={[styles.segmentText, activeTab === 'ejercicios' && styles.segmentTextActive]}>
+            Ejercicios
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.segment, activeTab === 'templates' && styles.segmentActive]}
+          onPress={() => setActiveTab('templates')}
+          activeOpacity={0.8}>
+          <Text style={[styles.segmentText, activeTab === 'templates' && styles.segmentTextActive]}>
+            Templates
+          </Text>
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={exercises}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => (
-          <ExerciseRow exercise={item} onDelete={handleDelete} />
-        )}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>Sin ejercicios.</Text>
-          </View>
-        }
-      />
+      {/* Exercises tab */}
+      {activeTab === 'ejercicios' && (
+        <FlatList
+          data={exercises}
+          keyExtractor={item => item.id}
+          renderItem={({ item }) => (
+            <ExerciseRow exercise={item} onDelete={handleDeleteExercise} />
+          )}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Sin ejercicios.</Text>
+            </View>
+          }
+        />
+      )}
 
+      {/* Templates tab */}
+      {activeTab === 'templates' && (
+        <FlatList
+          data={templates}
+          keyExtractor={item => item.id}
+          renderItem={({ item }) => (
+            <TemplateRow
+              template={item}
+              onDelete={handleDeleteTemplate}
+              onRename={handleRenameTemplate}
+            />
+          )}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <TouchableOpacity
+              style={styles.importBtn}
+              onPress={handleImportFromImage}
+              activeOpacity={0.8}>
+              <Text style={styles.importBtnText}>Importar desde imagen</Text>
+            </TouchableOpacity>
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Sin templates.</Text>
+              <Text style={styles.emptySubText}>
+                Importá tu plan de entrenamiento desde una imagen.
+              </Text>
+            </View>
+          }
+        />
+      )}
+
+      {/* New exercise modal */}
       <Modal
         visible={showModal}
         animationType="slide"
@@ -213,7 +476,7 @@ export default function ExercisesScreen() {
                   }}>
                   <Text style={styles.cancelBtnText}>Cancelar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSaveExercise}>
                   <Text style={styles.saveBtnText}>Guardar</Text>
                 </TouchableOpacity>
               </View>
@@ -233,7 +496,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 20,
     paddingTop: 24,
-    paddingBottom: 16,
+    paddingBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -254,6 +517,48 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
+  // Segmented control
+  segmentedControl: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginBottom: 16,
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 3,
+  },
+  segment: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  segmentActive: {
+    backgroundColor: colors.accent,
+  },
+  segmentText: {
+    color: colors.textSecondary,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  segmentTextActive: {
+    color: colors.black,
+    fontWeight: '700',
+  },
+  // Import button
+  importBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  importBtnText: {
+    color: colors.black,
+    fontWeight: '700',
+    fontSize: 15,
+  },
   list: {
     paddingHorizontal: 20,
     paddingBottom: 20,
@@ -271,6 +576,14 @@ const styles = StyleSheet.create({
   rowMain: { flex: 1 },
   rowName: { color: colors.text, fontSize: 15, fontWeight: '600' },
   rowMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 4 },
+  renameInput: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '600',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.accent,
+    paddingVertical: 2,
+  },
   deleteBtn: { paddingLeft: 12 },
   deleteBtnText: { color: colors.textSecondary, fontSize: 16 },
   emptyState: {
@@ -278,6 +591,34 @@ const styles = StyleSheet.create({
     marginTop: 60,
   },
   emptyText: { color: colors.textSecondary, fontSize: 15 },
+  emptySubText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 24,
+  },
+  // Loading overlay
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingBox: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 16,
+    padding: 32,
+    alignItems: 'center',
+    gap: 16,
+    minWidth: 220,
+  },
+  loadingText: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   // Modal
   modalOverlay: {
     flex: 1,
