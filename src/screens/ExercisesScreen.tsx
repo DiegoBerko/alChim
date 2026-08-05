@@ -8,10 +8,10 @@ import {
   TouchableOpacity,
   TextInput,
   Modal,
-  SafeAreaView,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { colors } from '../theme';
