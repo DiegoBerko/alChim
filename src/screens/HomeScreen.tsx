@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
-  Linking,
   View,
   Text,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -18,6 +18,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../theme';
 import { storage } from '../services/storage';
 import { useUpdate } from '../context/UpdateContext';
+import { downloadAndInstall } from '../services/updater';
 import type { WorkoutSession, SessionTemplate, PlannedSession } from '../types';
 import type { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 
@@ -86,6 +87,8 @@ export default function HomeScreen() {
   const [templates, setTemplates] = useState<SessionTemplate[]>([]);
   const [plannedSessions, setPlannedSessions] = useState<PlannedSession[]>([]);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadPct, setDownloadPct] = useState(0);
   const { updateInfo, clearUpdate } = useUpdate();
 
   useFocusEffect(
@@ -103,7 +106,22 @@ export default function HomeScreen() {
       `¿Descargar la actualización?${updateInfo.changelog ? `\n\n${updateInfo.changelog}` : ''}`,
       [
         { text: 'Ahora no', style: 'cancel', onPress: clearUpdate },
-        { text: 'Descargar', onPress: () => { Linking.openURL(updateInfo.url); clearUpdate(); } },
+        {
+          text: 'Descargar',
+          onPress: async () => {
+            clearUpdate();
+            setDownloadPct(0);
+            setDownloading(true);
+            try {
+              await downloadAndInstall(updateInfo.url, pct => setDownloadPct(pct));
+            } catch (e: unknown) {
+              const msg = e instanceof Error ? e.message : 'Error desconocido';
+              Alert.alert('Error al descargar', msg);
+            } finally {
+              setDownloading(false);
+            }
+          },
+        },
       ],
     );
   }
@@ -245,6 +263,20 @@ export default function HomeScreen() {
               onPress={() => setShowTemplateModal(false)}>
               <Text style={styles.modalCancelText}>Cancelar</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Download progress modal */}
+      <Modal visible={downloading} transparent animationType="fade">
+        <View style={styles.dlOverlay}>
+          <View style={styles.dlBox}>
+            <ActivityIndicator color={colors.accent} size="large" />
+            <Text style={styles.dlTitle}>Descargando actualización...</Text>
+            <View style={styles.dlBarBg}>
+              <View style={[styles.dlBarFill, { width: `${downloadPct}%` }]} />
+            </View>
+            <Text style={styles.dlPct}>{downloadPct}%</Text>
           </View>
         </View>
       </Modal>
@@ -485,5 +517,44 @@ const styles = StyleSheet.create({
   modalCancelText: {
     color: colors.textSecondary,
     fontSize: 15,
+  },
+  // Download modal
+  dlOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  dlBox: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 16,
+    padding: 28,
+    width: '100%',
+    alignItems: 'center',
+    gap: 16,
+  },
+  dlTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  dlBarBg: {
+    width: '100%',
+    height: 8,
+    backgroundColor: colors.border,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  dlBarFill: {
+    height: 8,
+    backgroundColor: colors.accent,
+    borderRadius: 4,
+  },
+  dlPct: {
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
