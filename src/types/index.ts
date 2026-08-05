@@ -28,11 +28,27 @@ export interface SessionExercise {
 export interface WorkoutSession {
   id: string;
   date: string; // YYYY-MM-DD
-  startTime: string; // ISO
+  startTime?: string; // ISO — undefined if status='planned'
   endTime?: string;
   exercises: SessionExercise[];
   estimatedKcal?: number;
   notes?: string;
+  status: 'planned' | 'completed';
+}
+
+export interface PlannedExercise {
+  exerciseId: string;
+  exerciseName: string;
+  targetSets: number;        // e.g. 3
+  targetReps: string;        // e.g. "12/10/8", "3x10", "30''"
+  notes?: string;            // e.g. "usar 7kg", "elastico potente"
+}
+
+export interface PlannedSession {
+  id: string;
+  name?: string;             // optional label, e.g. "Día 1 - Lunes"
+  createdAt: string;         // ISO
+  exercises: PlannedExercise[];
 }
 
 export interface SessionTemplate {

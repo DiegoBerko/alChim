@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Exercise, WorkoutSession, SessionTemplate, UserProfile } from '../types';
+import type { Exercise, WorkoutSession, SessionTemplate, UserProfile, PlannedSession } from '../types';
 
 const KEYS = {
   PROFILE: 'alchim_profile',
@@ -7,6 +7,7 @@ const KEYS = {
   EXERCISES: 'alchim_exercises',
   TEMPLATES: 'alchim_templates',
   PENDING_TEMPLATE: 'alchim_pending_template',
+  PLANNED_SESSIONS: 'alchim_planned_sessions',
 };
 
 const DEFAULT_EXERCISES: Exercise[] = [
@@ -122,7 +123,7 @@ export const storage = {
       } else {
         sessions.push(session);
       }
-      sessions.sort((a, b) => b.startTime.localeCompare(a.startTime));
+      sessions.sort((a, b) => (b.startTime ?? b.date).localeCompare(a.startTime ?? a.date));
       await AsyncStorage.setItem(KEYS.SESSIONS, JSON.stringify(sessions));
     } catch (error) {
       console.error('Error saving session:', error);
@@ -243,6 +244,44 @@ export const storage = {
     } catch (error) {
       console.error('Error getting pending template:', error);
       return null;
+    }
+  },
+
+  // ===== PLANNED SESSIONS =====
+  async getPlannedSessions(): Promise<PlannedSession[]> {
+    try {
+      const json = await AsyncStorage.getItem(KEYS.PLANNED_SESSIONS);
+      return json ? JSON.parse(json) : [];
+    } catch (error) {
+      console.error('Error getting planned sessions:', error);
+      return [];
+    }
+  },
+
+  async savePlannedSession(session: PlannedSession): Promise<void> {
+    try {
+      const sessions = await this.getPlannedSessions();
+      const idx = sessions.findIndex(s => s.id === session.id);
+      if (idx >= 0) {
+        sessions[idx] = session;
+      } else {
+        sessions.push(session);
+      }
+      await AsyncStorage.setItem(KEYS.PLANNED_SESSIONS, JSON.stringify(sessions));
+    } catch (error) {
+      console.error('Error saving planned session:', error);
+    }
+  },
+
+  async deletePlannedSession(id: string): Promise<void> {
+    try {
+      const sessions = await this.getPlannedSessions();
+      await AsyncStorage.setItem(
+        KEYS.PLANNED_SESSIONS,
+        JSON.stringify(sessions.filter(s => s.id !== id)),
+      );
+    } catch (error) {
+      console.error('Error deleting planned session:', error);
     }
   },
 };

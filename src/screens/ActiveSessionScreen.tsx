@@ -197,10 +197,10 @@ export default function ActiveSessionScreen() {
   }
 
   function cancelSession() {
-    Alert.alert('Cancelar sesión', '¿Seguro? Se perderán todos los datos.', [
-      { text: 'No', style: 'cancel' },
+    Alert.alert('Abandonar sesión', '¿Abandonás? Se perderán todos los datos registrados.', [
+      { text: 'Seguir entrenando', style: 'cancel' },
       {
-        text: 'Cancelar',
+        text: 'Abandonar',
         style: 'destructive',
         onPress: () => { setSessionStarted(false); setExercises([]); setElapsed(0); },
       },
@@ -297,6 +297,7 @@ export default function ActiveSessionScreen() {
       exercises: sessionExercises,
       estimatedKcal: kcal > 0 ? kcal : undefined,
       notes: sessionNotes.trim() || undefined,
+      status: 'completed',
     });
 
     setSessionStarted(false);

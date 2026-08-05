@@ -12,17 +12,22 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../theme';
 import { storage } from '../services/storage';
 import { useUpdate } from '../context/UpdateContext';
-import type { WorkoutSession, SessionTemplate } from '../types';
-import type { MainTabParamList } from '../navigation/AppNavigator';
+import type { WorkoutSession, SessionTemplate, PlannedSession } from '../types';
+import type { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 
-type HomeNavProp = BottomTabNavigationProp<MainTabParamList, 'Inicio'>;
+type HomeNavProp = CompositeNavigationProp<
+  BottomTabNavigationProp<MainTabParamList, 'Inicio'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 function SessionCard({ session }: { session: WorkoutSession }) {
-  const date = new Date(session.startTime);
+  const date = new Date(session.startTime ?? session.date);
   const dateStr = date.toLocaleDateString('es-AR', {
     weekday: 'short',
     day: 'numeric',
@@ -46,10 +51,40 @@ function SessionCard({ session }: { session: WorkoutSession }) {
   );
 }
 
+function PlannedSessionCard({
+  session,
+  onStart,
+  onEdit,
+}: {
+  session: PlannedSession;
+  onStart: () => void;
+  onEdit: () => void;
+}) {
+  return (
+    <View style={styles.plannedCard}>
+      <View style={styles.plannedCardInfo}>
+        <Text style={styles.plannedCardName}>{session.name || 'Sesión sin nombre'}</Text>
+        <Text style={styles.plannedCardMeta}>
+          {session.exercises.length} ejercicio{session.exercises.length !== 1 ? 's' : ''}
+        </Text>
+      </View>
+      <View style={styles.plannedCardActions}>
+        <TouchableOpacity style={styles.plannedEditBtn} onPress={onEdit} activeOpacity={0.8}>
+          <Text style={styles.plannedEditBtnText}>Editar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.plannedStartBtn} onPress={onStart} activeOpacity={0.8}>
+          <Text style={styles.plannedStartBtnText}>Empezar</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const navigation = useNavigation<HomeNavProp>();
   const [recentSessions, setRecentSessions] = useState<WorkoutSession[]>([]);
   const [templates, setTemplates] = useState<SessionTemplate[]>([]);
+  const [plannedSessions, setPlannedSessions] = useState<PlannedSession[]>([]);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const { updateInfo, clearUpdate } = useUpdate();
 
@@ -57,6 +92,7 @@ export default function HomeScreen() {
     useCallback(() => {
       storage.getSessions().then(all => setRecentSessions(all.slice(0, 5)));
       storage.getTemplates().then(setTemplates);
+      storage.getPlannedSessions().then(setPlannedSessions);
     }, []),
   );
 
@@ -86,44 +122,91 @@ export default function HomeScreen() {
     navigation.navigate('Sesión');
   }
 
+  async function startPlannedSession(session: PlannedSession) {
+    const template: SessionTemplate = {
+      id: session.id,
+      name: session.name || 'Sesión',
+      exercises: session.exercises.map(e => ({
+        exerciseId: e.exerciseId,
+        exerciseName: e.exerciseName,
+        targetSets: e.targetSets || 3,
+        targetReps: e.targetReps || '',
+        targetWeight: undefined,
+      })),
+    };
+    await storage.setPendingTemplate(template);
+    navigation.navigate('Sesión');
+  }
+
+  function editPlannedSession(session: PlannedSession) {
+    navigation.navigate('PlanSession', { session });
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>alChim</Text>
-        <Text style={styles.subtitle}>Tu diario de entrenamiento</Text>
-      </View>
-
-      {updateInfo && (
-        <TouchableOpacity style={styles.updateBanner} onPress={handleUpdate} activeOpacity={0.8}>
-          <Text style={styles.updateBannerText}>🔄 Nueva versión disponible — tap para actualizar</Text>
-        </TouchableOpacity>
-      )}
-
-      <TouchableOpacity
-        style={styles.newSessionBtn}
-        onPress={handleNewSession}
-        activeOpacity={0.8}>
-        <Text style={styles.newSessionBtnText}>+ Nueva sesión</Text>
-      </TouchableOpacity>
-
-      <Text style={styles.sectionTitle}>Sesiones recientes</Text>
-
-      {recentSessions.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>No hay sesiones todavía.</Text>
-          <Text style={styles.emptySubText}>
-            ¡Empezá tu primera sesión de entrenamiento!
-          </Text>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.header}>
+          <Text style={styles.title}>alChim</Text>
+          <Text style={styles.subtitle}>Tu diario de entrenamiento</Text>
         </View>
-      ) : (
-        <FlatList
-          data={recentSessions}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => <SessionCard session={item} />}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+
+        {updateInfo && (
+          <TouchableOpacity style={styles.updateBanner} onPress={handleUpdate} activeOpacity={0.8}>
+            <Text style={styles.updateBannerText}>🔄 Nueva versión disponible — tap para actualizar</Text>
+          </TouchableOpacity>
+        )}
+
+        <TouchableOpacity
+          style={styles.newSessionBtn}
+          onPress={handleNewSession}
+          activeOpacity={0.8}>
+          <Text style={styles.newSessionBtnText}>+ Nueva sesión</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.planSessionBtn}
+          onPress={() => navigation.navigate('PlanSession', undefined)}
+          activeOpacity={0.8}>
+          <Text style={styles.planSessionBtnText}>Planificar sesión</Text>
+        </TouchableOpacity>
+
+        {/* Planned sessions section */}
+        {plannedSessions.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Sesiones planificadas</Text>
+            <View style={styles.plannedList}>
+              {plannedSessions.map(s => (
+                <PlannedSessionCard
+                  key={s.id}
+                  session={s}
+                  onStart={() => startPlannedSession(s)}
+                  onEdit={() => editPlannedSession(s)}
+                />
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Recent sessions section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Sesiones recientes</Text>
+
+          {recentSessions.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>No hay sesiones todavía.</Text>
+              <Text style={styles.emptySubText}>
+                ¡Empezá tu primera sesión de entrenamiento!
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.list}>
+              {recentSessions.map(item => (
+                <SessionCard key={item.id} session={item} />
+              ))}
+            </View>
+          )}
+        </View>
+      </ScrollView>
 
       {/* Template picker modal */}
       <Modal
@@ -174,6 +257,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  scrollContent: {
+    paddingBottom: 24,
+  },
   header: {
     paddingHorizontal: 20,
     paddingTop: 24,
@@ -209,7 +295,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     marginHorizontal: 20,
     marginTop: 20,
-    marginBottom: 24,
+    marginBottom: 10,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -218,6 +304,23 @@ const styles = StyleSheet.create({
     color: colors.black,
     fontSize: 16,
     fontWeight: '700',
+  },
+  planSessionBtn: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginHorizontal: 20,
+    marginBottom: 24,
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  planSessionBtnText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  section: {
+    marginBottom: 8,
   },
   sectionTitle: {
     color: colors.textSecondary,
@@ -228,9 +331,63 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 12,
   },
+  plannedList: {
+    paddingHorizontal: 20,
+    gap: 10,
+    marginBottom: 24,
+  },
+  plannedCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  plannedCardInfo: {
+    flex: 1,
+  },
+  plannedCardName: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  plannedCardMeta: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  plannedCardActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  plannedEditBtn: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  plannedEditBtnText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  plannedStartBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  plannedStartBtnText: {
+    color: colors.black,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   list: {
     paddingHorizontal: 20,
-    paddingBottom: 20,
     gap: 10,
   },
   card: {
@@ -264,10 +421,9 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   emptyState: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingBottom: 80,
+    paddingVertical: 40,
   },
   emptyText: {
     color: colors.text,

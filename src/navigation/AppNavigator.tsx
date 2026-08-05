@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UpdateProvider } from '../context/UpdateContext';
 import { colors } from '../theme';
@@ -11,6 +12,8 @@ import ActiveSessionScreen from '../screens/ActiveSessionScreen';
 import HistoryScreen from '../screens/HistoryScreen';
 import ExercisesScreen from '../screens/ExercisesScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import PlanSessionScreen from '../screens/PlanSessionScreen';
+import type { PlannedSession } from '../types';
 
 export type MainTabParamList = {
   Inicio: undefined;
@@ -20,7 +23,13 @@ export type MainTabParamList = {
   Perfil: undefined;
 };
 
+export type RootStackParamList = {
+  MainTabs: undefined;
+  PlanSession: { session?: PlannedSession } | undefined;
+};
+
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const TAB_ICONS: Record<keyof MainTabParamList, string> = {
   Inicio: '🏠',
@@ -71,19 +80,28 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   );
 }
 
+function MainTabs() {
+  return (
+    <Tab.Navigator
+      tabBar={props => <CustomTabBar {...props} />}
+      screenOptions={{ headerShown: false }}>
+      <Tab.Screen name="Inicio" component={HomeScreen} />
+      <Tab.Screen name="Sesión" component={ActiveSessionScreen} />
+      <Tab.Screen name="Historial" component={HistoryScreen} />
+      <Tab.Screen name="Ejercicios" component={ExercisesScreen} />
+      <Tab.Screen name="Perfil" component={ProfileScreen} />
+    </Tab.Navigator>
+  );
+}
+
 export default function AppNavigator() {
   return (
     <UpdateProvider>
       <NavigationContainer>
-        <Tab.Navigator
-          tabBar={props => <CustomTabBar {...props} />}
-          screenOptions={{ headerShown: false }}>
-          <Tab.Screen name="Inicio" component={HomeScreen} />
-          <Tab.Screen name="Sesión" component={ActiveSessionScreen} />
-          <Tab.Screen name="Historial" component={HistoryScreen} />
-          <Tab.Screen name="Ejercicios" component={ExercisesScreen} />
-          <Tab.Screen name="Perfil" component={ProfileScreen} />
-        </Tab.Navigator>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="PlanSession" component={PlanSessionScreen} />
+        </Stack.Navigator>
       </NavigationContainer>
     </UpdateProvider>
   );
