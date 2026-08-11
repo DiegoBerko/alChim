@@ -9,11 +9,13 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../theme';
 import { storage } from '../services/storage';
+import { syncPlansFromCloud } from '../services/sync';
 import type { UserProfile } from '../types';
 
 const DEFAULT_PROFILE: UserProfile = {
@@ -26,6 +28,8 @@ const DEFAULT_PROFILE: UserProfile = {
 export default function ProfileScreen() {
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [saved, setSaved] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -45,6 +49,31 @@ export default function ProfileScreen() {
           [key]: ['name'].includes(key) ? t : parseFloat(t) || (t === '' ? undefined : 0),
         })),
     };
+  }
+
+  async function handleSync() {
+    const code = profile.linkCode?.trim();
+    if (!code) {
+      Alert.alert('Código requerido', 'Ingresá tu código de acceso primero.');
+      return;
+    }
+    setSyncing(true);
+    setSyncMsg(null);
+    // Save profile first so linkCode persists even if sync fails
+    await storage.saveProfile(profile);
+    const result = await syncPlansFromCloud(code);
+    setSyncing(false);
+    if (result.error) {
+      setSyncMsg({ text: result.error, ok: false });
+    } else {
+      const name = result.studentName ? ` (${result.studentName})` : '';
+      const parts: string[] = [];
+      if (result.added > 0) parts.push(`${result.added} nuevo${result.added !== 1 ? 's' : ''}`);
+      if (result.updated > 0) parts.push(`${result.updated} actualizado${result.updated !== 1 ? 's' : ''}`);
+      if (parts.length === 0) parts.push('Todo al día');
+      setSyncMsg({ text: `${parts.join(', ')}${name}`, ok: true });
+      setTimeout(() => setSyncMsg(null), 5000);
+    }
   }
 
   async function handleSave() {
@@ -163,6 +192,55 @@ export default function ProfileScreen() {
             autoCorrect={false}
           />
 
+          {/* ── Sync section ── */}
+          <View style={styles.sectionDivider} />
+          <Text style={styles.sectionTitle}>Sincronización de planes</Text>
+          <Text style={styles.subtitle}>
+            Ingresá el código que te dio tu entrenador para descargar tus planes activos.
+          </Text>
+
+          <Text style={styles.label}>Código de acceso</Text>
+          <TextInput
+            style={[styles.input, styles.inputCode]}
+            value={profile.linkCode ?? ''}
+            onChangeText={t =>
+              setProfile(p => ({ ...p, linkCode: t.toUpperCase() || undefined }))
+            }
+            placeholder="AB3XYZ"
+            placeholderTextColor={colors.textSecondary}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={10}
+          />
+
+          {syncMsg && (
+            <View
+              style={[
+                styles.syncMsg,
+                syncMsg.ok ? styles.syncMsgOk : styles.syncMsgErr,
+              ]}>
+              <Text
+                style={[
+                  styles.syncMsgText,
+                  syncMsg.ok ? styles.syncMsgTextOk : styles.syncMsgTextErr,
+                ]}>
+                {syncMsg.ok ? '✓ ' : '✕ '}{syncMsg.text}
+              </Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.syncBtn, syncing && styles.syncBtnDisabled]}
+            onPress={handleSync}
+            disabled={syncing}
+            activeOpacity={0.8}>
+            {syncing ? (
+              <ActivityIndicator color={colors.accent} size="small" />
+            ) : (
+              <Text style={styles.syncBtnText}>Sincronizar planes</Text>
+            )}
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.saveBtn, saved && styles.saveBtnSuccess]}
             onPress={handleSave}
@@ -251,4 +329,60 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
   },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginTop: 28,
+    marginBottom: 4,
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  inputCode: {
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: 4,
+    textAlign: 'center',
+  },
+  syncBtn: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 12,
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  syncBtnDisabled: {
+    opacity: 0.5,
+  },
+  syncBtnText: {
+    color: colors.accent,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  syncMsg: {
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 10,
+  },
+  syncMsgOk: {
+    backgroundColor: colors.success + '20',
+    borderWidth: 1,
+    borderColor: colors.success + '60',
+  },
+  syncMsgErr: {
+    backgroundColor: '#ef444420',
+    borderWidth: 1,
+    borderColor: '#ef444460',
+  },
+  syncMsgText: { fontSize: 13, fontWeight: '600' },
+  syncMsgTextOk: { color: colors.success },
+  syncMsgTextErr: { color: '#ef4444' },
 });

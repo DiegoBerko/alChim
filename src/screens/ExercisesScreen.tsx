@@ -10,15 +10,25 @@ import {
   Modal,
   ScrollView,
   ActivityIndicator,
+  NativeModules,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { colors } from '../theme';
 import { storage } from '../services/storage';
 import { parseWorkoutPDF } from '../services/groq';
-import type { Exercise, ExerciseCategory, SessionTemplate } from '../types';
+import type { Exercise, ExerciseCategory, PlannedSession, PlannedSet, SetMode } from '../types';
 import type { ParsedWorkoutPlan } from '../services/groq';
+import type { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
+
+type ExercisesNavProp = CompositeNavigationProp<
+  BottomTabNavigationProp<MainTabParamList, 'Ejercicios'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 const CATEGORY_LABELS: Record<ExerciseCategory, string> = {
   fuerza: 'Fuerza',
@@ -38,11 +48,7 @@ function ExerciseRow({
   function confirmDelete() {
     Alert.alert('Eliminar ejercicio', `¿Eliminar "${exercise.name}"?`, [
       { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: () => onDelete(exercise.id),
-      },
+      { text: 'Eliminar', style: 'destructive', onPress: () => onDelete(exercise.id) },
     ]);
   }
 
@@ -65,70 +71,51 @@ function ExerciseRow({
   );
 }
 
-// ─── Template row ─────────────────────────────────────────────────────────────
+// ─── Plan row ─────────────────────────────────────────────────────────────────
 
-function TemplateRow({
-  template,
+function PlanRow({
+  plan,
+  onPress,
   onDelete,
-  onRename,
+  onToggleActive,
 }: {
-  template: SessionTemplate;
+  plan: PlannedSession;
+  onPress: () => void;
   onDelete: (id: string) => void;
-  onRename: (id: string, name: string) => void;
+  onToggleActive: (plan: PlannedSession) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(template.name);
+  const isActive = plan.active !== false;
 
   function confirmDelete() {
-    Alert.alert('Eliminar template', `¿Eliminar "${template.name}"?`, [
+    Alert.alert('Eliminar plan', `¿Eliminar "${plan.name || 'Sesión sin nombre'}"?`, [
       { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: () => onDelete(template.id),
-      },
+      { text: 'Eliminar', style: 'destructive', onPress: () => onDelete(plan.id) },
     ]);
   }
 
-  function finishRename() {
-    setEditing(false);
-    const trimmed = name.trim();
-    if (trimmed && trimmed !== template.name) {
-      onRename(template.id, trimmed);
-    } else {
-      setName(template.name);
-    }
-  }
+  const preview = plan.exercises
+    .slice(0, 3)
+    .map(e => e.exerciseName)
+    .join(', ') + (plan.exercises.length > 3 ? '...' : '');
 
   return (
-    <TouchableOpacity
-      style={styles.row}
-      onLongPress={confirmDelete}
-      activeOpacity={0.8}>
+    <TouchableOpacity style={styles.row} onPress={onPress} onLongPress={confirmDelete} activeOpacity={0.75}>
       <View style={styles.rowMain}>
-        {editing ? (
-          <TextInput
-            style={styles.renameInput}
-            value={name}
-            onChangeText={setName}
-            onBlur={finishRename}
-            onSubmitEditing={finishRename}
-            autoFocus
-            returnKeyType="done"
-            placeholderTextColor={colors.textSecondary}
-          />
-        ) : (
-          <TouchableOpacity onPress={() => setEditing(true)}>
-            <Text style={styles.rowName}>{template.name}</Text>
-          </TouchableOpacity>
-        )}
+        <Text style={styles.rowName}>{plan.name || 'Sesión sin nombre'}</Text>
         <Text style={styles.rowMeta}>
-          {template.exercises.length} ejercicio{template.exercises.length !== 1 ? 's' : ''}
+          {plan.exercises.length} ejercicio{plan.exercises.length !== 1 ? 's' : ''}
         </Text>
+        {preview ? <Text style={styles.rowPreview}>{preview}</Text> : null}
       </View>
-      <TouchableOpacity onPress={confirmDelete} style={styles.deleteBtn} hitSlop={8}>
-        <Text style={styles.deleteBtnText}>✕</Text>
+      <TouchableOpacity
+        style={[styles.toggleBtn, !isActive && styles.toggleBtnInactive]}
+        onPress={() => onToggleActive(plan)}
+        hitSlop={8}>
+        <Text style={[styles.toggleBtnText, !isActive && styles.toggleBtnTextInactive]}>
+          {isActive ? 'Activo' : 'Inactivo'}
+        </Text>
       </TouchableOpacity>
+      <Text style={styles.rowChevron}>›</Text>
     </TouchableOpacity>
   );
 }
@@ -151,20 +138,23 @@ const EMPTY_FORM: NewExerciseForm = {
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
-type Tab = 'ejercicios' | 'templates';
+type Tab = 'ejercicios' | 'planes';
 
 export default function ExercisesScreen() {
+  const navigation = useNavigation<ExercisesNavProp>();
   const [activeTab, setActiveTab] = useState<Tab>('ejercicios');
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [templates, setTemplates] = useState<SessionTemplate[]>([]);
+  const [plans, setPlans] = useState<PlannedSession[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [showImportSheet, setShowImportSheet] = useState(false);
   const [form, setForm] = useState<NewExerciseForm>(EMPTY_FORM);
   const [importing, setImporting] = useState(false);
+  const [exSearch, setExSearch] = useState('');
 
   useFocusEffect(
     useCallback(() => {
       storage.getExercises().then(setExercises);
-      storage.getTemplates().then(setTemplates);
+      storage.getPlannedSessions().then(setPlans);
     }, []),
   );
 
@@ -196,32 +186,166 @@ export default function ExercisesScreen() {
       met,
     };
     await storage.saveExercise(exercise);
-    const updated = await storage.getExercises();
-    setExercises(updated);
+    setExercises(await storage.getExercises());
     setShowModal(false);
     setForm(EMPTY_FORM);
   }
 
-  // ─── Templates ─────────────────────────────────────────────────────────────
+  // ─── Plans ─────────────────────────────────────────────────────────────────
 
-  async function handleDeleteTemplate(id: string) {
-    await storage.deleteTemplate(id);
-    setTemplates(prev => prev.filter(t => t.id !== id));
+  async function handleDeletePlan(id: string) {
+    await storage.deletePlannedSession(id);
+    setPlans(prev => prev.filter(p => p.id !== id));
   }
 
-  async function handleRenameTemplate(id: string, name: string) {
-    const updated = templates.map(t => (t.id === id ? { ...t, name } : t));
-    const target = updated.find(t => t.id === id);
-    if (target) {
-      await storage.saveTemplate(target);
+  async function handleTogglePlanActive(plan: PlannedSession) {
+    const updated = { ...plan, active: plan.active === false ? true : false };
+    await storage.savePlannedSession(updated);
+    setPlans(prev => prev.map(p => p.id === updated.id ? updated : p));
+  }
+
+  // ─── Helpers ────────────────────────────────────────────────────────────────
+
+  function buildSetTargets(repsStr: string, numSets: number, weightKg?: number | null): { sets: PlannedSet[]; mode: SetMode; notes?: string } {
+    // 1. Extract side notes
+    let notes: string | undefined;
+    let cleanReps = repsStr;
+    const sideNoteRegex = /\s*(c\/lado|de cada lado|x lado|c\/u|cada lado|por lado)\b/gi;
+    const sideNoteMatches = cleanReps.match(sideNoteRegex);
+    if (sideNoteMatches) {
+      notes = sideNoteMatches.map(s => s.trim()).join(', ');
+      cleanReps = cleanReps.replace(sideNoteRegex, '').trim();
     }
-    setTemplates(updated);
+
+    // 2. Detect seconds ('' or " notation, e.g. 30'' or 30")
+    const isSeconds = /\d+[''`"]{1,2}/.test(cleanReps);
+    const mode: SetMode = isSeconds ? 'seconds' : 'reps';
+    cleanReps = cleanReps.replace(/[''`"]{1,2}/g, '').trim();
+
+    // 3. Build set targets
+    const w = weightKg ?? undefined;
+    let sets: PlannedSet[];
+    if (cleanReps.includes('/')) {
+      sets = cleanReps.split('/').map(r => ({ targetReps: r.trim(), targetWeight: w, mode }));
+    } else {
+      const xMatch = cleanReps.match(/^(\d+)[xX](\S+)$/);
+      if (xMatch) {
+        const count = parseInt(xMatch[1]);
+        sets = Array.from({ length: count }, () => ({ targetReps: xMatch[2], targetWeight: w, mode }));
+      } else {
+        sets = Array.from({ length: numSets > 0 ? numSets : 3 }, () => ({ targetReps: cleanReps, targetWeight: w, mode }));
+      }
+    }
+    return { sets, mode, notes };
   }
 
   // ─── Import flow ────────────────────────────────────────────────────────────
 
+  async function processBase64Image(pagesBase64: string[], groqKey: string) {
+    const plan: ParsedWorkoutPlan = await parseWorkoutPDF({ pagesBase64, groqKey });
+
+    const allExercises = await storage.getExercises();
+    const newPlans: PlannedSession[] = [];
+
+    for (const dia of plan.dias) {
+      const planExercises: PlannedSession['exercises'] = [];
+
+      for (const bloque of (dia.bloques ?? [])) {
+        for (const ej of (bloque.ejercicios ?? [])) {
+          const ejLower = ej.nombre.toLowerCase();
+          let found = allExercises.find(
+            e =>
+              e.name.toLowerCase() === ejLower ||
+              e.name.toLowerCase().includes(ejLower) ||
+              ejLower.includes(e.name.toLowerCase()),
+          );
+
+          if (!found) {
+            const newEx: Exercise = {
+              id: `ex_imported_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              name: ej.nombre,
+              muscleGroups: [],
+              category: 'fuerza',
+              met: 4,
+            };
+            await storage.saveExercise(newEx);
+            allExercises.push(newEx);
+            found = newEx;
+          }
+
+          const numSets = typeof ej.series === 'number' ? ej.series : parseInt(String(ej.series), 10) || 3;
+          const repsStr = ej.reps ?? '';
+          const weightKg = typeof ej.peso === 'number' ? ej.peso : undefined;
+          const { sets: setTargets, mode, notes: parsedNotes } = buildSetTargets(repsStr, numSets, weightKg);
+          // Also pick up notes from groq notas field or detalle
+          const exerciseNotes = ej.notas || parsedNotes || (ej.detalle && ej.detalle.length < 80 ? ej.detalle : undefined);
+
+          planExercises.push({
+            exerciseId: found.id,
+            exerciseName: found.name,
+            targetSets: setTargets.length,
+            targetReps: repsStr,
+            targetWeight: weightKg,
+            setTargets,
+            bloque: bloque.nombre,
+            mode,
+            notes: exerciseNotes,
+          });
+        }
+      }
+
+      const newPlan: PlannedSession = {
+        id: `plan_${Date.now()}_${dia.nombre.replace(/\s+/g, '_')}`,
+        name: dia.nombre.replace('Dia', 'Día'),
+        createdAt: new Date().toISOString(),
+        exercises: planExercises,
+      };
+      await storage.savePlannedSession(newPlan);
+      newPlans.push(newPlan);
+    }
+
+    setPlans(await storage.getPlannedSessions());
+    setActiveTab('planes');
+
+    const names = newPlans.map(p => p.name).join(', ');
+    Alert.alert('Importación exitosa', `Se importaron ${newPlans.length} planes: ${names}`);
+  }
+
+  async function handleImportFromPdf() {
+    const profile = await storage.getProfile();
+    if (!profile?.groqKey) {
+      Alert.alert('Sin clave Groq', 'Configurá tu clave Groq en Perfil primero.');
+      return;
+    }
+    const groqKey = profile.groqKey;
+
+    let uri: string | null = null;
+    try {
+      uri = await NativeModules.FilePicker.pickPdf();
+    } catch (err) {
+      Alert.alert('Error', 'No se pudo abrir el selector de archivos.');
+      return;
+    }
+    if (!uri) return;
+
+    setImporting(true);
+    try {
+      const pageCount: number = await NativeModules.PdfRenderer.getPageCount(uri);
+      const pages = Math.min(pageCount, 5); // Groq max 5 images
+      const pagesBase64: string[] = [];
+      for (let i = 0; i < pages; i++) {
+        const b64: string = await NativeModules.PdfRenderer.renderPageToBase64(uri, i);
+        pagesBase64.push(b64);
+      }
+      await processBase64Image(pagesBase64, groqKey);
+    } catch (err) {
+      Alert.alert('Error al importar PDF', String(err));
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function handleImportFromImage() {
-    // Check groq key first
     const profile = await storage.getProfile();
     if (!profile?.groqKey) {
       Alert.alert('Sin clave Groq', 'Configurá tu clave Groq en Perfil primero.');
@@ -230,77 +354,15 @@ export default function ExercisesScreen() {
     const groqKey = profile.groqKey;
 
     launchImageLibrary({ mediaType: 'photo', includeBase64: true }, async response => {
-      if (response.didCancel || !response.assets?.length) {
-        return;
-      }
+      if (response.didCancel || !response.assets?.length) return;
       const asset = response.assets[0];
       if (!asset.base64) {
         Alert.alert('Error', 'No se pudo obtener la imagen en base64.');
         return;
       }
-
       setImporting(true);
       try {
-        const imageBase64 = asset.base64;
-        const mimeType = asset.type || 'image/jpeg';
-        const plan: ParsedWorkoutPlan = await parseWorkoutPDF({ imageBase64, mimeType, groqKey });
-
-        // Convert to SessionTemplate[]
-        const allExercises = await storage.getExercises();
-        const newTemplates: SessionTemplate[] = [];
-
-        for (const dia of plan.dias) {
-          const templateExercises: SessionTemplate['exercises'] = [];
-
-          for (const bloque of dia.bloques) {
-            for (const ej of bloque.ejercicios) {
-              // Try to find matching exercise by name (case-insensitive, partial)
-              const ejLower = ej.nombre.toLowerCase();
-              let found = allExercises.find(
-                e =>
-                  e.name.toLowerCase() === ejLower ||
-                  e.name.toLowerCase().includes(ejLower) ||
-                  ejLower.includes(e.name.toLowerCase()),
-              );
-
-              if (!found) {
-                // Create new exercise
-                const newEx: Exercise = {
-                  id: `ex_imported_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-                  name: ej.nombre,
-                  muscleGroups: [],
-                  category: 'fuerza',
-                  met: 4,
-                };
-                await storage.saveExercise(newEx);
-                allExercises.push(newEx);
-                found = newEx;
-              }
-
-              templateExercises.push({
-                exerciseId: found.id,
-                exerciseName: found.name,
-                targetSets: typeof ej.series === 'number' ? ej.series : parseInt(String(ej.series), 10) || 3,
-                targetReps: ej.reps ?? '',
-              });
-            }
-          }
-
-          const template: SessionTemplate = {
-            id: `tmpl_${Date.now()}_${dia.nombre.replace(/\s+/g, '_')}`,
-            name: dia.nombre.replace('Dia', 'Día'),
-            exercises: templateExercises,
-          };
-          await storage.saveTemplate(template);
-          newTemplates.push(template);
-        }
-
-        const updated = await storage.getTemplates();
-        setTemplates(updated);
-        setActiveTab('templates');
-
-        const names = newTemplates.map(t => t.name).join(', ');
-        Alert.alert('Importación exitosa', `Se importaron ${newTemplates.length} templates: ${names}`);
+        await processBase64Image([asset.base64], groqKey);
       } catch (err) {
         Alert.alert('Error al importar', String(err));
       } finally {
@@ -311,6 +373,13 @@ export default function ExercisesScreen() {
 
   const categories: ExerciseCategory[] = ['fuerza', 'cardio', 'peso_corporal'];
 
+  const filteredExList = exSearch.trim()
+    ? exercises.filter(e =>
+        e.name.toLowerCase().includes(exSearch.toLowerCase()) ||
+        e.muscleGroups.some(g => g.toLowerCase().includes(exSearch.toLowerCase())),
+      )
+    : exercises;
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Loading overlay */}
@@ -318,7 +387,7 @@ export default function ExercisesScreen() {
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={colors.accent} />
-            <Text style={styles.loadingText}>Analizando imagen con IA...</Text>
+            <Text style={styles.loadingText}>Analizando con IA...</Text>
           </View>
         </View>
       </Modal>
@@ -327,12 +396,19 @@ export default function ExercisesScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Ejercicios</Text>
         {activeTab === 'ejercicios' && (
-          <TouchableOpacity
-            style={styles.addBtn}
-            onPress={() => setShowModal(true)}
-            activeOpacity={0.8}>
+          <TouchableOpacity style={styles.addBtn} onPress={() => setShowModal(true)} activeOpacity={0.8}>
             <Text style={styles.addBtnText}>+ Agregar</Text>
           </TouchableOpacity>
+        )}
+        {activeTab === 'planes' && (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity style={styles.importBtnHeader} onPress={() => setShowImportSheet(true)} activeOpacity={0.8}>
+              <Text style={styles.importBtnHeaderText}>Importar ▾</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('PlanSession', undefined)} activeOpacity={0.8}>
+              <Text style={styles.addBtnText}>+ Nuevo</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -347,72 +423,106 @@ export default function ExercisesScreen() {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.segment, activeTab === 'templates' && styles.segmentActive]}
-          onPress={() => setActiveTab('templates')}
+          style={[styles.segment, activeTab === 'planes' && styles.segmentActive]}
+          onPress={() => setActiveTab('planes')}
           activeOpacity={0.8}>
-          <Text style={[styles.segmentText, activeTab === 'templates' && styles.segmentTextActive]}>
-            Templates
+          <Text style={[styles.segmentText, activeTab === 'planes' && styles.segmentTextActive]}>
+            Planes
           </Text>
         </TouchableOpacity>
       </View>
 
       {/* Exercises tab */}
       {activeTab === 'ejercicios' && (
-        <FlatList
-          data={exercises}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <ExerciseRow exercise={item} onDelete={handleDeleteExercise} />
-          )}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Sin ejercicios.</Text>
-            </View>
-          }
-        />
+        <>
+          <View style={styles.searchRow}>
+            <TextInput
+              style={styles.searchInput}
+              value={exSearch}
+              onChangeText={setExSearch}
+              placeholder="Buscar ejercicio..."
+              placeholderTextColor={colors.textSecondary}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+          </View>
+          <FlatList
+            data={filteredExList}
+            keyExtractor={item => item.id}
+            renderItem={({ item }) => (
+              <ExerciseRow exercise={item} onDelete={handleDeleteExercise} />
+            )}
+            contentContainerStyle={styles.list}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>Sin ejercicios.</Text>
+              </View>
+            }
+          />
+        </>
       )}
 
-      {/* Templates tab */}
-      {activeTab === 'templates' && (
-        <FlatList
-          data={templates}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <TemplateRow
-              template={item}
-              onDelete={handleDeleteTemplate}
-              onRename={handleRenameTemplate}
-            />
-          )}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
-            <TouchableOpacity
-              style={styles.importBtn}
-              onPress={handleImportFromImage}
-              activeOpacity={0.8}>
-              <Text style={styles.importBtnText}>Importar desde imagen</Text>
-            </TouchableOpacity>
-          }
-          ListEmptyComponent={
+      {/* Plans tab */}
+      {activeTab === 'planes' && (
+        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+          {/* Active plans */}
+          {plans.filter(p => p.active !== false).length === 0 && (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Sin templates.</Text>
+              <Text style={styles.emptyText}>Sin planes activos.</Text>
               <Text style={styles.emptySubText}>
-                Importá tu plan de entrenamiento desde una imagen.
+                Importá tu plan desde un PDF o imagen, o creá uno desde Inicio.
               </Text>
             </View>
-          }
-        />
+          )}
+          {plans.filter(p => p.active !== false).map(item => (
+            <PlanRow
+              key={item.id}
+              plan={item}
+              onPress={() => navigation.navigate('PlanSession', { session: item })}
+              onDelete={handleDeletePlan}
+              onToggleActive={handleTogglePlanActive}
+            />
+          ))}
+
+          {/* Inactive / archived plans */}
+          {plans.filter(p => p.active === false).length > 0 && (
+            <>
+              <Text style={styles.sectionDivider}>HISTORIAL DE PLANES</Text>
+              {plans.filter(p => p.active === false).map(item => (
+                <PlanRow
+                  key={item.id}
+                  plan={item}
+                  onPress={() => navigation.navigate('PlanSession', { session: item })}
+                  onDelete={handleDeletePlan}
+                  onToggleActive={handleTogglePlanActive}
+                />
+              ))}
+            </>
+          )}
+        </ScrollView>
       )}
 
+      {/* Import sheet */}
+      <Modal visible={showImportSheet} animationType="slide" transparent onRequestClose={() => setShowImportSheet(false)}>
+        <TouchableOpacity style={styles.sheetOverlay} onPress={() => setShowImportSheet(false)} activeOpacity={1}>
+          <View style={styles.sheetBox}>
+            <Text style={styles.sheetTitle}>Importar plan</Text>
+            <TouchableOpacity style={styles.sheetOption} onPress={() => { setShowImportSheet(false); handleImportFromPdf(); }} activeOpacity={0.8}>
+              <Text style={styles.sheetOptionText}>Desde PDF</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.sheetOption} onPress={() => { setShowImportSheet(false); handleImportFromImage(); }} activeOpacity={0.8}>
+              <Text style={styles.sheetOptionText}>Desde imagen</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.sheetCancel} onPress={() => setShowImportSheet(false)}>
+              <Text style={styles.sheetCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* New exercise modal */}
-      <Modal
-        visible={showModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowModal(false)}>
+      <Modal visible={showModal} animationType="slide" transparent onRequestClose={() => setShowModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -432,16 +542,9 @@ export default function ExercisesScreen() {
                 {categories.map(cat => (
                   <TouchableOpacity
                     key={cat}
-                    style={[
-                      styles.categoryChip,
-                      form.category === cat && styles.categoryChipActive,
-                    ]}
+                    style={[styles.categoryChip, form.category === cat && styles.categoryChipActive]}
                     onPress={() => setForm(f => ({ ...f, category: cat }))}>
-                    <Text
-                      style={[
-                        styles.categoryChipText,
-                        form.category === cat && styles.categoryChipTextActive,
-                      ]}>
+                    <Text style={[styles.categoryChipText, form.category === cat && styles.categoryChipTextActive]}>
                       {CATEGORY_LABELS[cat]}
                     </Text>
                   </TouchableOpacity>
@@ -470,10 +573,7 @@ export default function ExercisesScreen() {
               <View style={styles.modalActions}>
                 <TouchableOpacity
                   style={styles.cancelBtn}
-                  onPress={() => {
-                    setShowModal(false);
-                    setForm(EMPTY_FORM);
-                  }}>
+                  onPress={() => { setShowModal(false); setForm(EMPTY_FORM); }}>
                   <Text style={styles.cancelBtnText}>Cancelar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.saveBtn} onPress={handleSaveExercise}>
@@ -489,10 +589,7 @@ export default function ExercisesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
   header: {
     paddingHorizontal: 20,
     paddingTop: 24,
@@ -501,23 +598,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  title: {
-    color: colors.text,
-    fontSize: 26,
-    fontWeight: '800',
-  },
-  addBtn: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  addBtnText: {
-    color: colors.black,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  // Segmented control
+  title: { color: colors.text, fontSize: 26, fontWeight: '800' },
+  addBtn: { backgroundColor: colors.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  addBtnText: { color: colors.black, fontWeight: '700', fontSize: 14 },
+
   segmentedControl: {
     flexDirection: 'row',
     marginHorizontal: 20,
@@ -528,42 +612,22 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 3,
   },
-  segment: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  segmentActive: {
-    backgroundColor: colors.accent,
-  },
-  segmentText: {
-    color: colors.textSecondary,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  segmentTextActive: {
-    color: colors.black,
-    fontWeight: '700',
-  },
-  // Import button
-  importBtn: {
-    backgroundColor: colors.accent,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  importBtnText: {
-    color: colors.black,
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  list: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    gap: 8,
-  },
+  segment: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 },
+  segmentActive: { backgroundColor: colors.accent },
+  segmentText: { color: colors.textSecondary, fontWeight: '600', fontSize: 14 },
+  segmentTextActive: { color: colors.black, fontWeight: '700' },
+
+  importBtnHeader: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  importBtnHeaderText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheetBox: { backgroundColor: colors.surfaceElevated, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, gap: 2 },
+  sheetTitle: { color: colors.textSecondary, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
+  sheetOption: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  sheetOptionText: { color: colors.text, fontSize: 16, fontWeight: '600' },
+  sheetCancel: { paddingVertical: 16, alignItems: 'center' },
+  sheetCancelText: { color: colors.textSecondary, fontSize: 15 },
+
+  list: { paddingHorizontal: 20, paddingBottom: 20, gap: 8 },
   row: {
     backgroundColor: colors.surface,
     borderRadius: 12,
@@ -571,131 +635,68 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   rowMain: { flex: 1 },
   rowName: { color: colors.text, fontSize: 15, fontWeight: '600' },
   rowMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 4 },
-  renameInput: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.accent,
-    paddingVertical: 2,
-  },
+  rowPreview: { color: colors.textSecondary, fontSize: 12, marginTop: 2, fontStyle: 'italic' },
+  rowChevron: { color: colors.accent, fontSize: 22, fontWeight: '300', paddingLeft: 4 },
   deleteBtn: { paddingLeft: 12 },
-  deleteBtnText: { color: colors.textSecondary, fontSize: 16 },
-  emptyState: {
-    alignItems: 'center',
-    marginTop: 60,
+  toggleBtn: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginLeft: 8,
   },
-  emptyText: { color: colors.textSecondary, fontSize: 15 },
-  emptySubText: {
+  toggleBtnInactive: { borderColor: colors.border },
+  toggleBtnText: { color: colors.accent, fontSize: 11, fontWeight: '700' },
+  toggleBtnTextInactive: { color: colors.textSecondary },
+  sectionDivider: {
     color: colors.textSecondary,
-    fontSize: 13,
-    marginTop: 8,
-    textAlign: 'center',
-    paddingHorizontal: 24,
-  },
-  // Loading overlay
-  loadingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingBox: {
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 16,
-    padding: 32,
-    alignItems: 'center',
-    gap: 16,
-    minWidth: 220,
-  },
-  loadingText: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalBox: {
-    backgroundColor: colors.surfaceElevated,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 24,
-    maxHeight: '85%',
-  },
-  modalTitle: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 20,
-  },
-  label: {
-    color: colors.textSecondary,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
-    marginBottom: 6,
-    marginTop: 14,
+    marginTop: 20,
+    marginBottom: 10,
   },
-  input: {
+  deleteBtnText: { color: colors.textSecondary, fontSize: 16 },
+  searchRow: { paddingHorizontal: 20, paddingBottom: 12 },
+  searchInput: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderRadius: 10,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     color: colors.text,
-    fontSize: 15,
+    fontSize: 14,
   },
-  categoryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  categoryChip: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  categoryChipActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
-  },
+
+  emptyState: { alignItems: 'center', marginTop: 60 },
+  emptyText: { color: colors.textSecondary, fontSize: 15 },
+  emptySubText: { color: colors.textSecondary, fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 24 },
+
+  loadingOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center' },
+  loadingBox: { backgroundColor: colors.surfaceElevated, borderRadius: 16, padding: 32, alignItems: 'center', gap: 16, minWidth: 220 },
+  loadingText: { color: colors.text, fontSize: 15, fontWeight: '600', textAlign: 'center' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalBox: { backgroundColor: colors.surfaceElevated, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: '85%' },
+  modalTitle: { color: colors.text, fontSize: 20, fontWeight: '700', marginBottom: 20 },
+  label: { color: colors.textSecondary, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6, marginTop: 14 },
+  input: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, color: colors.text, fontSize: 15 },
+  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  categoryChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  categoryChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   categoryChipText: { color: colors.textSecondary, fontSize: 13 },
   categoryChipTextActive: { color: colors.black, fontWeight: '700' },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 24,
-    marginBottom: 8,
-  },
-  cancelBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
+  modalActions: { flexDirection: 'row', gap: 12, marginTop: 24, marginBottom: 8 },
+  cancelBtn: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   cancelBtnText: { color: colors.text, fontSize: 15 },
-  saveBtn: {
-    flex: 1,
-    backgroundColor: colors.accent,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
+  saveBtn: { flex: 1, backgroundColor: colors.accent, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   saveBtnText: { color: colors.black, fontWeight: '700', fontSize: 15 },
 });

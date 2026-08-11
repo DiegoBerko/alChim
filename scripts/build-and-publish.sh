@@ -24,7 +24,7 @@ npx react-native bundle \
 # 3. APK
 echo ""
 echo "🔨 Compilando APK..."
-cd android && ./gradlew assembleRelease --quiet && cd ..
+(cd android && ./gradlew assembleRelease --quiet)
 
 APK="android/app/build/outputs/apk/release/app-release.apk"
 echo "✅ APK listo: $APK"

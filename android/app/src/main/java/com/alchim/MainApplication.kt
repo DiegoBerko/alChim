@@ -15,6 +15,8 @@ class MainApplication : Application(), ReactApplication {
       packageList =
         PackageList(this).packages.apply {
           add(ApkInstallerPackage())
+          add(PdfRendererPackage())
+          add(FilePickerPackage())
         },
     )
   }

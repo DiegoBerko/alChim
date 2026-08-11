@@ -1,5 +1,6 @@
 export type EffortLevel = 'fácil' | 'normal' | 'intenso' | 'muy_intenso';
 export type ExerciseCategory = 'fuerza' | 'cardio' | 'peso_corporal';
+export type SetMode = 'reps' | 'seconds';
 
 export interface Exercise {
   id: string;
@@ -15,6 +16,8 @@ export interface ExerciseSet {
   weight?: number; // kg
   feedback?: string;
   effort?: EffortLevel;
+  mode?: SetMode;    // defaults to 'reps'
+  seconds?: number;  // valor cuando mode === 'seconds'
 }
 
 export interface SessionExercise {
@@ -23,32 +26,50 @@ export interface SessionExercise {
   sets: ExerciseSet[];
   feedback?: string;
   effort?: EffortLevel;
+  completionOrder?: number; // 0-based index in which this exercise was marked done
 }
 
 export interface WorkoutSession {
   id: string;
   date: string; // YYYY-MM-DD
-  startTime?: string; // ISO — undefined if status='planned'
+  startTime?: string; // ISO
   endTime?: string;
   exercises: SessionExercise[];
   estimatedKcal?: number;
   notes?: string;
   status: 'planned' | 'completed';
+  plannedSessionId?: string; // ID of the PlannedSession this was started from
+}
+
+// Per-set target (reps + optional weight)
+export interface PlannedSet {
+  targetReps: string;    // "10", "30''", "10 c/lado"
+  targetWeight?: number; // kg
+  mode?: SetMode;        // defaults to 'reps'
 }
 
 export interface PlannedExercise {
   exerciseId: string;
   exerciseName: string;
-  targetSets: number;        // e.g. 3
-  targetReps: string;        // e.g. "12/10/8", "3x10", "30''"
-  notes?: string;            // e.g. "usar 7kg", "elastico potente"
+  targetSets: number;        // fallback when no setTargets
+  targetReps: string;        // fallback when no setTargets
+  targetWeight?: number;     // fallback weight for all sets
+  setTargets?: PlannedSet[]; // per-set reps + weight (overrides targetSets/targetReps)
+  bloque?: string;           // "Entrada en calor" | "Bloque Principal" | "Bloque Accesorio"
+  notes?: string;
+  mode?: SetMode;            // default mode del ejercicio
 }
 
 export interface PlannedSession {
   id: string;
-  name?: string;             // optional label, e.g. "Día 1 - Lunes"
-  createdAt: string;         // ISO
+  name?: string;
+  createdAt: string; // ISO
   exercises: PlannedExercise[];
+  active?: boolean;   // true (default) = shown in Inicio; false = archived
+  lastUsed?: string;  // ISO — when last started as a session
+  cloudId?: string;      // "${planId}_${dayId}" — set when synced from backend, used for dedup
+  planGroupId?: string;  // cloud plan ID — all days of the same plan share this
+  planGroupName?: string; // display name of the parent plan (e.g. "Rutina Agosto")
 }
 
 export interface SessionTemplate {
@@ -60,6 +81,9 @@ export interface SessionTemplate {
     targetSets: number;
     targetReps: string;
     targetWeight?: number;
+    setTargets?: PlannedSet[];
+    bloque?: string;
+    mode?: SetMode;
   }[];
 }
 
@@ -71,4 +95,5 @@ export interface UserProfile {
   weight: number; // kg
   bodyFatPct?: number; // %
   groqKey?: string;
+  linkCode?: string; // código de acceso para sincronizar planes del backoffice
 }
