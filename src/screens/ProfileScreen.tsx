@@ -61,7 +61,7 @@ export default function ProfileScreen() {
     setSyncMsg(null);
     // Save profile first so linkCode persists even if sync fails
     await storage.saveProfile(profile);
-    const result = await syncPlansFromCloud(code);
+    const result = await syncPlansFromCloud(code, profile.backendUrl);
     setSyncing(false);
     if (result.error) {
       setSyncMsg({ text: result.error, ok: false });
@@ -198,6 +198,18 @@ export default function ProfileScreen() {
           <Text style={styles.subtitle}>
             Ingresá el código que te dio tu entrenador para descargar tus planes activos.
           </Text>
+
+          <Text style={styles.label}>URL del backoffice</Text>
+          <TextInput
+            style={styles.input}
+            value={profile.backendUrl ?? ''}
+            onChangeText={t => setProfile(p => ({ ...p, backendUrl: t.trim() || undefined }))}
+            placeholder="https://tu-app.vercel.app"
+            placeholderTextColor={colors.textSecondary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
 
           <Text style={styles.label}>Código de acceso</Text>
           <TextInput

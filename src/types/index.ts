@@ -95,5 +95,6 @@ export interface UserProfile {
   weight: number; // kg
   bodyFatPct?: number; // %
   groqKey?: string;
-  linkCode?: string; // código de acceso para sincronizar planes del backoffice
+  linkCode?: string;    // código de acceso para sincronizar planes del backoffice
+  backendUrl?: string;  // URL del backoffice (ej: https://alchim.vercel.app)
 }

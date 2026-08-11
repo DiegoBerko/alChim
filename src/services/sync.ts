@@ -1,4 +1,4 @@
-import { BACKEND_URL } from '../config/api';
+import { BACKEND_URL as DEFAULT_BACKEND_URL } from '../config/api';
 import { storage } from './storage';
 import type { PlannedSession, PlannedExercise, PlannedSet, SetMode } from '../types';
 
@@ -121,12 +121,16 @@ export interface SyncResult {
   error?: string;
 }
 
-export async function syncPlansFromCloud(linkCode: string): Promise<SyncResult> {
+export async function syncPlansFromCloud(
+  linkCode: string,
+  backendUrl?: string,
+): Promise<SyncResult> {
+  const base = (backendUrl?.trim().replace(/\/$/, '') || DEFAULT_BACKEND_URL);
   let data: { student: { name: string; surname: string }; plans: WebPlan[] };
 
   try {
     const res = await fetch(
-      `${BACKEND_URL}/api/student/plans?code=${encodeURIComponent(
+      `${base}/api/student/plans?code=${encodeURIComponent(
         linkCode.trim().toUpperCase(),
       )}`,
     );
