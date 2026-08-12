@@ -606,9 +606,15 @@ function SessionPageInner() {
         blocks: prev.blocks.map((b, bIdx) =>
           bIdx !== bi ? b : {
             ...b,
-            exercises: b.exercises.map((ex, eIdx) =>
-              eIdx !== ei ? ex : { ...ex, done: !ex.done }
-            ),
+            exercises: b.exercises.map((ex, eIdx) => {
+              if (eIdx !== ei) return ex;
+              const nowDone = !ex.done;
+              return {
+                ...ex,
+                done: nowDone,
+                sets: ex.sets.map((s) => ({ ...s, done: nowDone })),
+              };
+            }),
           }
         ),
       };
