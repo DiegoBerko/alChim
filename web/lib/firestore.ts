@@ -321,6 +321,19 @@ export async function getGymSessions(studentId: string): Promise<GymSession[]> {
   return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as GymSession));
 }
 
+export async function updateGymSession(
+  studentId: string,
+  sessionId: string,
+  data: Partial<Omit<GymSession, 'id' | 'studentId'>>
+): Promise<void> {
+  await db
+    .collection('students')
+    .doc(studentId)
+    .collection('gymSessions')
+    .doc(sessionId)
+    .update(data as FirebaseFirestore.UpdateData<Record<string, unknown>>);
+}
+
 export async function createPlanFromExisting(
   studentId: string,
   name: string,

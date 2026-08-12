@@ -18,7 +18,9 @@ export interface ActiveSession {
   planName: string;
   dayId: string;
   dayName: string;
-  startedAt: number; // Date.now()
+  startedAt: number;
+  pausedAt?: number;       // Date.now() when paused, undefined when running
+  totalPausedMs?: number;  // accumulated paused milliseconds
   blocks: SessionBlock[];
   generalNote: string;
 }

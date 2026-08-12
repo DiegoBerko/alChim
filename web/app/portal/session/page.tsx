@@ -18,9 +18,6 @@ const EFFORT_CYCLE: EffortLevel[] = ['facil', 'normal', 'intenso', 'muy_intenso'
 const EFFORT_LABEL: Record<EffortLevel, string> = {
   facil: 'Fácil', normal: 'Normal', intenso: 'Intenso', muy_intenso: 'Máx',
 };
-const EFFORT_SHORT: Record<EffortLevel, string> = {
-  facil: 'F', normal: 'N', intenso: 'I', muy_intenso: 'MI',
-};
 const EFFORT_COLOR: Record<EffortLevel, string> = {
   facil: '#4CAF50', normal: '#F5A623', intenso: '#FF9800', muy_intenso: '#F44336',
 };
@@ -91,6 +88,204 @@ function countProgress(blocks: SessionBlock[]): { done: number; total: number } 
   let done = 0, total = 0;
   for (const b of blocks) for (const ex of b.exercises) { total++; if (ex.done) done++; }
   return { done, total };
+}
+
+function calcElapsed(session: ActiveSession): number {
+  const pausedMs = session.totalPausedMs ?? 0;
+  if (session.pausedAt) {
+    return Math.floor((session.pausedAt - session.startedAt - pausedMs) / 1000);
+  }
+  return Math.floor((Date.now() - session.startedAt - pausedMs) / 1000);
+}
+
+// ─── Plan Preview ─────────────────────────────────────────────────────────────
+
+function PlanPreview({
+  planId,
+  dayId,
+  planName,
+  dayName,
+}: {
+  planId: string;
+  dayId: string;
+  planName: string;
+  dayName: string;
+}) {
+  const router = useRouter();
+  const [blocks, setBlocks] = useState<SessionBlock[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+
+  const load = useCallback(() => {
+    setLoadError(false);
+    const code = getPortalCode();
+    if (!code) return;
+    fetch(`/api/student/plans?code=${code}`)
+      .then((r) => r.json())
+      .then((data: { plans: Plan[] }) => {
+        const plan = data.plans.find((p) => p.id === planId);
+        if (!plan) throw new Error('plan not found');
+        let day: PlanDay | undefined;
+        if (plan.days && plan.days.length > 0) day = plan.days.find((d) => d.id === dayId);
+        else if (dayId === '__single__') day = { id: '__single__', name: 'Día 1', blocks: plan.blocks };
+        if (!day) throw new Error('day not found');
+        // Build read-only blocks from plan structure
+        const builtBlocks: SessionBlock[] = day.blocks
+          .slice()
+          .sort((a, b) => a.orderIndex - b.orderIndex)
+          .map((block) => ({
+            planBlockId: block.id,
+            name: block.name,
+            orderIndex: block.orderIndex,
+            exercises: block.exercises
+              .slice()
+              .sort((a, b) => a.orderIndex - b.orderIndex)
+              .map((ex) => ({
+                planExerciseId: ex.id,
+                exerciseName: ex.exerciseName,
+                orderIndex: ex.orderIndex,
+                mode: ex.mode,
+                notes: ex.notes,
+                studentNote: '',
+                done: false,
+                sets: ex.sets.map((s) => ({
+                  setNumber: s.setNumber,
+                  targetReps: s.targetReps,
+                  targetWeight: s.targetWeight,
+                  mode: s.mode ?? ex.mode,
+                  actualReps: s.targetReps,
+                  actualWeight: s.targetWeight,
+                  done: false,
+                  effort: 'normal' as EffortLevel,
+                })),
+              })),
+          }));
+        setBlocks(builtBlocks);
+      })
+      .catch(() => setLoadError(true));
+  }, [planId, dayId]);
+
+  useEffect(() => {
+    load();
+    const existing = getActiveSession();
+    setActiveSession(existing);
+  }, [load]);
+
+  const handleStart = () => {
+    const params = new URLSearchParams({ planId, dayId, planName, dayName });
+    router.push(`/portal/session?${params.toString()}`);
+  };
+
+  const hasSameSession = activeSession && activeSession.planId === planId && activeSession.dayId === dayId;
+
+  return (
+    <div className="pb-16">
+      {/* Sticky header */}
+      <div
+        className="sticky z-40"
+        style={{ top: 0, backgroundColor: '#111', borderBottom: '1px solid #222', margin: '0 -1rem', padding: '0 1rem' }}
+      >
+        <div className="max-w-lg mx-auto py-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-bold text-sm truncate" style={{ color: '#f5f5f5' }}>{planName}</p>
+            <p className="text-xs truncate" style={{ color: '#888' }}>{dayName}</p>
+          </div>
+          <button
+            onClick={handleStart}
+            className="px-4 py-2 rounded-xl text-sm font-bold shrink-0"
+            style={{ backgroundColor: '#F5A623', color: '#0D0D0D' }}
+          >
+            Empezar
+          </button>
+        </div>
+      </div>
+
+      {hasSameSession && (
+        <div
+          className="mt-4 rounded-xl px-4 py-3 flex items-center justify-between"
+          style={{ backgroundColor: '#1a1a1a', border: '1px solid #F5A623' }}
+        >
+          <p className="text-sm" style={{ color: '#F5A623' }}>Tenés esta sesión en curso</p>
+          <button
+            onClick={() => {
+              const params = new URLSearchParams({ planId, dayId, planName, dayName });
+              router.push(`/portal/session?${params.toString()}`);
+            }}
+            className="text-sm font-semibold ml-3 shrink-0"
+            style={{ color: '#F5A623' }}
+          >
+            Retomar
+          </button>
+        </div>
+      )}
+
+      {loadError ? (
+        <div className="mt-8 text-center space-y-3">
+          <p className="text-sm" style={{ color: '#888' }}>No se pudo cargar</p>
+          <button
+            onClick={load}
+            className="px-4 py-2 rounded-lg text-sm"
+            style={{ backgroundColor: '#242424', color: '#f5f5f5' }}
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : blocks === null ? (
+        <div className="flex items-center justify-center mt-16">
+          <div className="w-8 h-8 rounded-full border-2 animate-spin"
+            style={{ borderColor: '#F5A623', borderTopColor: 'transparent' }} />
+        </div>
+      ) : (
+        <div className="space-y-6 pt-5">
+          {blocks.map((block) => (
+            <div key={block.planBlockId}>
+              <p className="text-xs font-bold uppercase tracking-wider mb-3 px-1" style={{ color: '#F5A623' }}>
+                {block.name}
+              </p>
+              <div className="space-y-2">
+                {block.exercises.map((ex) => (
+                  <div key={ex.planExerciseId} className="rounded-xl px-4 py-3"
+                    style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
+                    <p className="text-sm font-medium mb-2" style={{ color: '#888' }}>{ex.exerciseName}</p>
+                    <div className="space-y-1">
+                      {ex.sets.map((s) => (
+                        <p key={s.setNumber} className="text-xs" style={{ color: '#555' }}>
+                          S{s.setNumber} · {s.targetReps} reps{s.targetWeight ? ` · ${s.targetWeight}kg` : ''}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Discard Dialog ───────────────────────────────────────────────────────────
+
+function DiscardDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}>
+      <div className="w-full max-w-xs rounded-2xl p-6 space-y-4" style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
+        <h2 className="font-bold text-lg" style={{ color: '#f5f5f5' }}>Descartar sesión</h2>
+        <p className="text-sm" style={{ color: '#888' }}>¿Seguro? Se perderá el progreso de esta sesión.</p>
+        <div className="space-y-2">
+          <button onClick={onConfirm} className="w-full py-3 rounded-xl font-semibold text-sm"
+            style={{ backgroundColor: '#ef4444', color: '#fff' }}>
+            Descartar
+          </button>
+          <button onClick={onCancel} className="w-full py-3 rounded-xl font-semibold text-sm"
+            style={{ backgroundColor: '#242424', color: '#f5f5f5', border: '1px solid #2a2a2a' }}>
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Set Row ──────────────────────────────────────────────────────────────────
@@ -170,13 +365,13 @@ function SetRow({
           backgroundColor: `${color}20`,
           border: `1px solid ${color}`,
           color,
-          minWidth: '2.5rem',
+          minWidth: '4.5rem',
           textAlign: 'center',
           opacity: disabled ? 0.4 : 1,
         }}
         title={EFFORT_LABEL[effort]}
       >
-        {EFFORT_SHORT[effort]}
+        {EFFORT_LABEL[effort]}
       </button>
     </div>
   );
@@ -217,7 +412,7 @@ function ExerciseCard({
       {/* Header */}
       <div
         className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
-        style={{ borderBottom: collapsed ? 'none' : '1px solid #222' }}
+        style={{ borderBottom: collapsed ? 'none' : '1px solid rgba(255,255,255,0.07)' }}
         onClick={() => !isDone && setCollapsed((v) => !v)}
       >
         {/* Collapse chevron */}
@@ -277,7 +472,7 @@ function ExerciseCard({
           </div>
 
           {/* Set rows */}
-          <div className="divide-y" style={{ borderColor: '#1a1a1a' }}>
+          <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
             {exercise.sets.map((set, si) => (
               <SetRow
                 key={set.setNumber}
@@ -289,7 +484,7 @@ function ExerciseCard({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid #222' }}>
+          <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
             <button
               onClick={() => setShowDetails((v) => !v)}
               className="text-xs transition-colors"
@@ -398,9 +593,9 @@ function ConflictDialog({
 // ─── Finish modal ─────────────────────────────────────────────────────────────
 
 function FinishModal({
-  session, elapsed, onClose, onSave, saving, saveError, onNoteChange,
+  session, frozenElapsed, onClose, onSave, saving, saveError, onNoteChange,
 }: {
-  session: ActiveSession; elapsed: number; onClose: () => void; onSave: () => void;
+  session: ActiveSession; frozenElapsed: number; onClose: () => void; onSave: () => void;
   saving: boolean; saveError: string | null; onNoteChange: (note: string) => void;
 }) {
   const { done, total } = countProgress(session.blocks);
@@ -430,7 +625,7 @@ function FinishModal({
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#242424' }}>
               <p className="text-xs mb-1 font-medium uppercase tracking-wider" style={{ color: '#555' }}>Tiempo</p>
-              <p className="font-bold text-lg font-mono" style={{ color: '#F5A623' }}>{formatTime(elapsed)}</p>
+              <p className="font-bold text-lg font-mono" style={{ color: '#F5A623' }}>{formatTime(frozenElapsed)}</p>
             </div>
             <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#242424' }}>
               <p className="text-xs mb-1 font-medium uppercase tracking-wider" style={{ color: '#555' }}>Ejercicios</p>
@@ -526,6 +721,7 @@ function SessionPageInner() {
   const dayId = searchParams.get('dayId') ?? '';
   const planName = searchParams.get('planName') ?? '';
   const dayName = searchParams.get('dayName') ?? '';
+  const isPreview = searchParams.get('preview') === 'true';
 
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -535,8 +731,11 @@ function SessionPageInner() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showSaved, setShowSaved] = useState(false);
+  const [showDiscard, setShowDiscard] = useState(false);
+  const [finishElapsed, setFinishElapsed] = useState<number | null>(null);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedIndicatorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userChangedRef = useRef(false);
 
   // ── Wake Lock ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -555,12 +754,15 @@ function SessionPageInner() {
   // ── Timer ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!session) return;
-    const startedAt = session.startedAt;
-    const tick = () => setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    if (session.pausedAt) {
+      setElapsed(calcElapsed(session));
+      return;
+    }
+    const tick = () => setElapsed(calcElapsed(session));
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [session?.startedAt]);
+  }, [session?.startedAt, session?.pausedAt, session?.totalPausedMs]);
 
   // ── Load fresh session from API ──────────────────────────────────────────
   const loadFresh = useCallback((code: string, onDone?: () => void) => {
@@ -583,6 +785,7 @@ function SessionPageInner() {
 
   // ── Initialise ───────────────────────────────────────────────────────────
   useEffect(() => {
+    if (isPreview) { setInitialising(false); return; }
     if (!planId || !dayId) { router.replace('/portal/plans'); return; }
     const code = getPortalCode();
     if (!code) { router.replace('/portal'); return; }
@@ -594,7 +797,7 @@ function SessionPageInner() {
       setConflictSession(existing); setInitialising(false); return;
     }
     loadFresh(code);
-  }, [planId, dayId, loadFresh, router]);
+  }, [planId, dayId, loadFresh, router, isPreview]);
 
   // ── Auto-save ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -602,15 +805,18 @@ function SessionPageInner() {
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
       saveActiveSession(session);
-      setShowSaved(true);
-      if (savedIndicatorTimer.current) clearTimeout(savedIndicatorTimer.current);
-      savedIndicatorTimer.current = setTimeout(() => setShowSaved(false), 2000);
+      if (userChangedRef.current) {
+        setShowSaved(true);
+        if (savedIndicatorTimer.current) clearTimeout(savedIndicatorTimer.current);
+        savedIndicatorTimer.current = setTimeout(() => setShowSaved(false), 2000);
+      }
     }, 500);
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
   }, [session]);
 
   // ── Mutators ─────────────────────────────────────────────────────────────
   const updateSet = useCallback((bi: number, ei: number, si: number, u: Partial<SessionSet>) => {
+    userChangedRef.current = true;
     setSession((prev) => {
       if (!prev) return prev;
       return {
@@ -631,6 +837,7 @@ function SessionPageInner() {
   }, []);
 
   const updateNote = useCallback((bi: number, ei: number, note: string) => {
+    userChangedRef.current = true;
     setSession((prev) => {
       if (!prev) return prev;
       return {
@@ -648,6 +855,7 @@ function SessionPageInner() {
   }, []);
 
   const updateEffort = useCallback((bi: number, ei: number, effort: EffortLevel | undefined) => {
+    userChangedRef.current = true;
     setSession((prev) => {
       if (!prev) return prev;
       return {
@@ -668,6 +876,7 @@ function SessionPageInner() {
   }, []);
 
   const toggleExDone = useCallback((bi: number, ei: number) => {
+    userChangedRef.current = true;
     setSession((prev) => {
       if (!prev) return prev;
       return {
@@ -691,7 +900,26 @@ function SessionPageInner() {
   }, []);
 
   const updateGeneralNote = useCallback((note: string) => {
+    userChangedRef.current = true;
     setSession((prev) => (prev ? { ...prev, generalNote: note } : prev));
+  }, []);
+
+  // ── Pause / Resume ────────────────────────────────────────────────────────
+  const handlePause = useCallback(() => {
+    userChangedRef.current = true;
+    setSession((prev) => {
+      if (!prev || prev.pausedAt) return prev;
+      return { ...prev, pausedAt: Date.now() };
+    });
+  }, []);
+
+  const handleResume = useCallback(() => {
+    userChangedRef.current = true;
+    setSession((prev) => {
+      if (!prev || !prev.pausedAt) return prev;
+      const addedMs = Date.now() - prev.pausedAt;
+      return { ...prev, pausedAt: undefined, totalPausedMs: (prev.totalPausedMs ?? 0) + addedMs };
+    });
   }, []);
 
   // ── Save ─────────────────────────────────────────────────────────────────
@@ -705,7 +933,7 @@ function SessionPageInner() {
       dayId: session.dayId, dayName: session.dayName,
       startedAt: new Date(session.startedAt).toISOString(),
       finishedAt: new Date().toISOString(),
-      durationSeconds: Math.floor((Date.now() - session.startedAt) / 1000),
+      durationSeconds: finishElapsed ?? elapsed,
       blocks: session.blocks,
       generalNote: session.generalNote,
     };
@@ -722,6 +950,10 @@ function SessionPageInner() {
   }
 
   // ── Loading ───────────────────────────────────────────────────────────────
+  if (isPreview) {
+    return <PlanPreview planId={planId} dayId={dayId} planName={planName} dayName={dayName} />;
+  }
+
   if (initialising) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -753,6 +985,13 @@ function SessionPageInner() {
 
   return (
     <>
+      {showDiscard && (
+        <DiscardDialog
+          onConfirm={() => { clearActiveSession(); router.push('/portal/plans'); }}
+          onCancel={() => setShowDiscard(false)}
+        />
+      )}
+
       {/* ── Sticky header ── */}
       <div
         className="sticky z-40"
@@ -773,21 +1012,37 @@ function SessionPageInner() {
               </p>
               <p className="text-xs truncate" style={{ color: '#888' }}>{session.dayName}</p>
             </div>
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
               {showSaved && (
-                <span className="text-xs font-medium transition-opacity" style={{ color: '#22c55e' }}>
-                  ✓ Guardado
-                </span>
+                <span className="text-xs font-medium" style={{ color: '#22c55e' }}>✓ Guardado</span>
               )}
-              <span className="font-mono text-xl font-bold" style={{ color: '#F5A623' }}>
+              {session.pausedAt ? (
+                <button onClick={handleResume}
+                  className="px-3 py-2 rounded-xl text-sm font-bold"
+                  style={{ backgroundColor: '#22c55e', color: '#fff' }}>
+                  ▶ Reanudar
+                </button>
+              ) : (
+                <button onClick={handlePause}
+                  className="px-3 py-2 rounded-xl text-sm font-medium"
+                  style={{ backgroundColor: '#242424', color: '#888', border: '1px solid #333' }}>
+                  ⏸
+                </button>
+              )}
+              <span className="font-mono text-xl font-bold" style={{ color: session.pausedAt ? '#888' : '#F5A623' }}>
                 {formatTime(elapsed)}
               </span>
               <button
-                onClick={() => setShowFinish(true)}
-                className="px-4 py-2 rounded-xl text-sm font-bold"
-                style={{ backgroundColor: '#F5A623', color: '#0D0D0D' }}
-              >
+                onClick={() => { setFinishElapsed(elapsed); setShowFinish(true); }}
+                className="px-3 py-2 rounded-xl text-sm font-bold"
+                style={{ backgroundColor: '#F5A623', color: '#0D0D0D' }}>
                 Finalizar
+              </button>
+              <button
+                onClick={() => setShowDiscard(true)}
+                className="px-2 py-2 rounded-xl text-sm"
+                style={{ backgroundColor: '#242424', color: '#666', border: '1px solid #333' }}>
+                ✕
               </button>
             </div>
           </div>
@@ -840,8 +1095,8 @@ function SessionPageInner() {
       {showFinish && (
         <FinishModal
           session={session}
-          elapsed={elapsed}
-          onClose={() => { setShowFinish(false); setSaveError(null); }}
+          frozenElapsed={finishElapsed ?? elapsed}
+          onClose={() => { setShowFinish(false); setSaveError(null); setFinishElapsed(null); }}
           onSave={handleSave}
           saving={saving}
           saveError={saveError}

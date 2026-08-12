@@ -94,6 +94,17 @@ export default function PlansPage() {
     router.push(`/portal/session?${params.toString()}`);
   }
 
+  function handlePreview(plan: Plan, day: PlanDay) {
+    const params = new URLSearchParams({
+      planId: plan.id,
+      dayId: day.id,
+      planName: plan.name,
+      dayName: day.name,
+      preview: 'true',
+    });
+    router.push(`/portal/session?${params.toString()}`);
+  }
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -255,14 +266,10 @@ export default function PlansPage() {
                     style={{ borderTop: '1px solid #2a2a2a' }}
                   >
                     {days.map((day) => (
-                      <button
+                      <div
                         key={day.id}
-                        onClick={() => handleDaySelect(plan, day)}
-                        className="w-full px-4 py-3 rounded-lg flex items-center justify-between text-left mt-2 transition-colors active:opacity-75"
-                        style={{
-                          backgroundColor: '#0D0D0D',
-                          border: '1px solid #2a2a2a',
-                        }}
+                        className="w-full px-4 py-3 rounded-lg flex items-center justify-between mt-2"
+                        style={{ backgroundColor: '#0D0D0D', border: '1px solid #2a2a2a' }}
                       >
                         <div>
                           <span className="font-medium text-sm" style={{ color: '#f5f5f5' }}>
@@ -272,18 +279,23 @@ export default function PlansPage() {
                             {day.blocks.reduce((acc, b) => acc + b.exercises.length, 0)} ejercicios
                           </span>
                         </div>
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          style={{ color: '#F5A623', flexShrink: 0 }}
-                        >
-                          <polyline points="9 18 15 12 9 6" />
-                        </svg>
-                      </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handlePreview(plan, day)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                            style={{ backgroundColor: '#242424', color: '#888', border: '1px solid #333' }}
+                          >
+                            Ver plan
+                          </button>
+                          <button
+                            onClick={() => handleDaySelect(plan, day)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                            style={{ backgroundColor: '#F5A623', color: '#0D0D0D' }}
+                          >
+                            Empezar
+                          </button>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 )}

@@ -69,6 +69,32 @@ function calcStreak(sessions: GymSession[]): number {
   return streak;
 }
 
+type PlanDiff =
+  | { type: 'omitted'; exerciseName: string }
+  | { type: 'reps'; exerciseName: string; setNumber: number; actual: string; target: string }
+  | { type: 'weight'; exerciseName: string; setNumber: number; actual: number | undefined; target: number | undefined };
+
+function computeDiffs(blocks: SessionBlock[]): PlanDiff[] {
+  const diffs: PlanDiff[] = [];
+  for (const block of blocks) {
+    for (const ex of block.exercises) {
+      if (!ex.done) {
+        diffs.push({ type: 'omitted', exerciseName: ex.exerciseName });
+        continue;
+      }
+      for (const s of ex.sets) {
+        if (s.actualReps !== s.targetReps) {
+          diffs.push({ type: 'reps', exerciseName: ex.exerciseName, setNumber: s.setNumber, actual: s.actualReps, target: s.targetReps });
+        }
+        if ((s.actualWeight ?? undefined) !== (s.targetWeight ?? undefined)) {
+          diffs.push({ type: 'weight', exerciseName: ex.exerciseName, setNumber: s.setNumber, actual: s.actualWeight, target: s.targetWeight });
+        }
+      }
+    }
+  }
+  return diffs;
+}
+
 const EFFORT_LABELS: Record<EffortLevel, string> = {
   facil: 'Fácil',
   normal: 'Normal',
@@ -85,9 +111,37 @@ const EFFORT_COLORS: Record<EffortLevel, string> = {
 
 // ─── Session card ─────────────────────────────────────────────────────────────
 
-function SessionCard({ session }: { session: GymSession }) {
+function SessionCard({ session, onUpdate }: { session: GymSession; onUpdate: (updated: GymSession) => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editBlocks, setEditBlocks] = useState<SessionBlock[]>([]);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const { done, total } = countDoneSets(session.blocks);
+
+  function startEdit() {
+    setEditBlocks(JSON.parse(JSON.stringify(session.blocks)));
+    setIsEditing(true);
+  }
+  function cancelEdit() { setIsEditing(false); setEditError(null); }
+  async function saveEdit() {
+    const code = getPortalCode();
+    setEditSaving(true); setEditError(null);
+    try {
+      const res = await fetch(`/api/student/sessions?code=${code}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: session.id, blocks: editBlocks }),
+      });
+      if (!res.ok) throw new Error();
+      onUpdate({ ...session, blocks: editBlocks });
+      setIsEditing(false);
+    } catch {
+      setEditError('No se pudo guardar.');
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   return (
     <div
@@ -110,13 +164,33 @@ function SessionCard({ session }: { session: GymSession }) {
               {session.dayName}
             </p>
           </div>
-          <div className="text-right shrink-0">
-            <p className="font-mono font-bold text-sm" style={{ color: '#F5A623' }}>
-              {formatDuration(session.durationSeconds)}
-            </p>
-            <p className="text-xs mt-0.5" style={{ color: '#888' }}>
-              {done}/{total} series
-            </p>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="text-right">
+              <p className="font-mono font-bold text-sm" style={{ color: '#F5A623' }}>
+                {formatDuration(session.durationSeconds)}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: '#888' }}>
+                {done}/{total} series
+              </p>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); if (isEditing) cancelEdit(); else startEdit(); setExpanded(true); }}
+              className="text-xs px-2 py-1 rounded-md shrink-0"
+              style={{ color: '#666', border: '1px solid #2a2a2a', backgroundColor: 'transparent' }}
+            >
+              {isEditing ? 'Cancelar' : 'Editar'}
+            </button>
+            <svg
+              style={{ color: '#888', transform: expanded ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
           </div>
         </div>
         {!expanded && (
@@ -124,79 +198,131 @@ function SessionCard({ session }: { session: GymSession }) {
             {getExercisePreview(session.blocks)}
           </p>
         )}
-        <div className="flex items-center justify-end mt-2">
-          <svg
-            style={{ color: '#888', transform: expanded ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </div>
       </button>
 
       {expanded && (
         <div style={{ borderTop: '1px solid #2a2a2a' }}>
-          {session.blocks.map((block) => (
-            <div key={block.planBlockId} className="px-4 py-3">
-              <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#F5A623' }}>
-                {block.name}
-              </p>
-              {block.exercises.map((ex) => (
-                <div key={ex.planExerciseId} className="mb-3">
-                  <p className="text-sm font-medium mb-1" style={{ color: '#f5f5f5' }}>
-                    {ex.exerciseName}
-                  </p>
-                  <div className="space-y-1">
-                    {ex.sets.map((s) => (
-                      <div key={s.setNumber} className="flex items-center gap-2 text-xs" style={{ color: '#888' }}>
-                        <span className="w-4">{s.setNumber}.</span>
-                        <span>
-                          {s.actualReps}
-                          {s.mode === 'seconds' ? 's' : ' reps'}
-                          {s.actualWeight ? ` · ${s.actualWeight}kg` : ''}
-                        </span>
-                        {s.effort && (
-                          <span
-                            className="px-1.5 py-0.5 rounded-full text-xs"
-                            style={{
-                              backgroundColor: `${EFFORT_COLORS[s.effort]}22`,
-                              color: EFFORT_COLORS[s.effort],
-                            }}
-                          >
-                            {EFFORT_LABELS[s.effort]}
-                          </span>
-                        )}
-                        {!s.done && (
-                          <span className="px-1.5 py-0.5 rounded-full text-xs" style={{ backgroundColor: '#2a2a2a', color: '#888' }}>
-                            Pendiente
-                          </span>
-                        )}
-                      </div>
-                    ))}
+          {/* Summary section */}
+          {(() => {
+            const diffs = computeDiffs(session.blocks);
+            const exerciseNotes = session.blocks.flatMap(b =>
+              b.exercises.filter(ex => ex.done && ex.studentNote).map(ex => ({ name: ex.exerciseName, note: ex.studentNote }))
+            );
+            const hasSummary = session.generalNote || diffs.length > 0 || exerciseNotes.length > 0;
+            if (!hasSummary) return null;
+            return (
+              <div className="px-4 py-3" style={{ borderBottom: '1px solid #2a2a2a' }}>
+                {session.generalNote && (
+                  <p className="text-sm italic mb-2" style={{ color: '#aaa' }}>"{session.generalNote}"</p>
+                )}
+                {diffs.map((d, i) => (
+                  <div key={i} className="text-xs mb-1" style={{ color: '#888' }}>
+                    {d.type === 'omitted' && <span><span style={{ color: '#ef4444' }}>✗ Omitido</span>  {d.exerciseName}</span>}
+                    {d.type === 'reps' && <span><span style={{ color: '#F5A623' }}>↕</span> {d.exerciseName} S{d.setNumber}: {d.actual} reps <span style={{ color: '#555' }}>(plan: {d.target})</span></span>}
+                    {d.type === 'weight' && <span><span style={{ color: '#F5A623' }}>↕</span> {d.exerciseName} S{d.setNumber}: {d.actual ?? '—'}kg <span style={{ color: '#555' }}>(plan: {d.target ?? '—'}kg)</span></span>}
                   </div>
-                  {ex.studentNote && (
-                    <p className="text-xs mt-1 italic" style={{ color: '#888' }}>
-                      {ex.studentNote}
-                    </p>
-                  )}
+                ))}
+                {exerciseNotes.map((n, i) => (
+                  <div key={i} className="text-xs italic mb-1" style={{ color: '#666' }}>
+                    💬 {n.name}: "{n.note}"
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Exercise list - not editing */}
+          {!isEditing && (
+            <div className="px-4 py-3">
+              {session.blocks.map((block) => (
+                <div key={block.planBlockId} className="mb-3">
+                  <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#F5A623' }}>
+                    {block.name}
+                  </p>
+                  {block.exercises.map((ex) => (
+                    ex.done ? (
+                      <div key={ex.planExerciseId} className="mb-3">
+                        <p className="text-sm font-medium mb-1" style={{ color: '#f5f5f5' }}>{ex.exerciseName}</p>
+                        <div className="space-y-0.5">
+                          {ex.sets.map((s) => (
+                            <div key={s.setNumber} className="flex items-center gap-2 text-xs" style={{ color: '#888' }}>
+                              <span className="w-4">{s.setNumber}.</span>
+                              <span>
+                                {s.actualReps}{s.mode === 'seconds' ? 's' : ' reps'}
+                                {s.actualWeight ? ` · ${s.actualWeight}kg` : ''}
+                              </span>
+                              {s.effort && s.effort !== 'normal' && (
+                                <span className="px-1.5 py-0.5 rounded-full text-xs"
+                                  style={{ backgroundColor: `${EFFORT_COLORS[s.effort]}22`, color: EFFORT_COLORS[s.effort] }}>
+                                  {EFFORT_LABELS[s.effort]}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={ex.planExerciseId} className="mb-2 flex items-center gap-2">
+                        <span className="text-xs" style={{ color: '#555' }}>○</span>
+                        <span className="text-sm" style={{ color: '#555' }}>{ex.exerciseName}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: '#2a2a2a', color: '#555' }}>Pendiente</span>
+                      </div>
+                    )
+                  ))}
                 </div>
               ))}
             </div>
-          ))}
+          )}
 
-          {session.generalNote && (
-            <div className="px-4 pb-4" style={{ borderTop: '1px solid #2a2a2a' }}>
-              <p className="text-xs font-medium mt-3 mb-1" style={{ color: '#888' }}>
-                Nota general
-              </p>
-              <p className="text-sm" style={{ color: '#f5f5f5' }}>
-                {session.generalNote}
-              </p>
+          {/* Editing mode */}
+          {isEditing && (
+            <div className="px-4 py-3">
+              {editBlocks.map((block, bi) => (
+                <div key={block.planBlockId} className="mb-3">
+                  <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#F5A623' }}>{block.name}</p>
+                  {block.exercises.map((ex, ei) => (
+                    <div key={ex.planExerciseId} className="mb-3">
+                      <p className="text-sm font-medium mb-1" style={{ color: '#f5f5f5' }}>{ex.exerciseName}</p>
+                      {ex.sets.map((s, si) => (
+                        <div key={s.setNumber} className="flex items-center gap-2 text-xs mb-1">
+                          <span style={{ color: '#555' }}>S{s.setNumber}</span>
+                          <input
+                            type="text"
+                            value={s.actualReps}
+                            onChange={(e) => {
+                              const updated = JSON.parse(JSON.stringify(editBlocks));
+                              updated[bi].exercises[ei].sets[si].actualReps = e.target.value;
+                              setEditBlocks(updated);
+                            }}
+                            className="w-16 px-2 py-1 rounded text-center text-xs outline-none"
+                            style={{ backgroundColor: '#0D0D0D', border: '1px solid #333', color: '#f5f5f5' }}
+                          />
+                          <span style={{ color: '#555' }}>reps</span>
+                          <input
+                            type="number"
+                            value={s.actualWeight ?? ''}
+                            onChange={(e) => {
+                              const updated = JSON.parse(JSON.stringify(editBlocks));
+                              updated[bi].exercises[ei].sets[si].actualWeight = e.target.value === '' ? undefined : parseFloat(e.target.value);
+                              setEditBlocks(updated);
+                            }}
+                            className="w-16 px-2 py-1 rounded text-center text-xs outline-none"
+                            style={{ backgroundColor: '#0D0D0D', border: '1px solid #333', color: '#f5f5f5' }}
+                            placeholder="—"
+                          />
+                          <span style={{ color: '#555' }}>kg</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {editError && <p className="text-xs mb-2" style={{ color: '#ef4444' }}>{editError}</p>}
+              <button onClick={saveEdit} disabled={editSaving}
+                className="w-full py-2 rounded-xl text-sm font-bold"
+                style={{ backgroundColor: '#F5A623', color: '#0D0D0D', opacity: editSaving ? 0.6 : 1 }}>
+                {editSaving ? 'Guardando...' : 'Guardar cambios'}
+              </button>
             </div>
           )}
         </div>
@@ -222,7 +348,7 @@ function getMonthDays(year: number, month: number): (Date | null)[] {
   return cells;
 }
 
-function CalendarTab({ sessions }: { sessions: GymSession[] }) {
+function CalendarTab({ sessions, onUpdate }: { sessions: GymSession[]; onUpdate: (updated: GymSession) => void }) {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
@@ -340,7 +466,7 @@ function CalendarTab({ sessions }: { sessions: GymSession[] }) {
             {new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
           {selectedSessions.map((s) => (
-            <SessionCard key={s.id} session={s} />
+            <SessionCard key={s.id} session={s} onUpdate={onUpdate} />
           ))}
         </div>
       )}
@@ -474,11 +600,13 @@ export default function HistoryPage() {
       ) : activeTab === 'list' ? (
         <div className="space-y-3">
           {sessions.map((session) => (
-            <SessionCard key={session.id} session={session} />
+            <SessionCard key={session.id} session={session}
+              onUpdate={(updated) => setSessions(prev => prev.map(s => s.id === updated.id ? updated : s))} />
           ))}
         </div>
       ) : (
-        <CalendarTab sessions={sessions} />
+        <CalendarTab sessions={sessions}
+          onUpdate={(updated) => setSessions(prev => prev.map(s => s.id === updated.id ? updated : s))} />
       )}
     </div>
   );
