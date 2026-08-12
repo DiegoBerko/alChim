@@ -86,3 +86,49 @@ export interface Plan {
   days?: PlanDay[];
   basedOnPlanId?: string;
 }
+
+// ─── Student Portal / Session types ──────────────────────────────────────────
+
+export type EffortLevel = 'facil' | 'normal' | 'intenso' | 'muy_intenso';
+
+export interface SessionSet {
+  setNumber: number;
+  targetReps: string;
+  targetWeight?: number;
+  mode: SetMode;
+  actualReps: string;
+  actualWeight?: number;
+  done: boolean;
+  effort?: EffortLevel;
+}
+
+export interface SessionExercise {
+  planExerciseId: string;
+  exerciseName: string;
+  orderIndex: number;
+  mode: SetMode;
+  notes?: string;
+  sets: SessionSet[];
+  studentNote: string;
+}
+
+export interface SessionBlock {
+  planBlockId: string;
+  name: string;
+  orderIndex: number;
+  exercises: SessionExercise[];
+}
+
+export interface GymSession {
+  id: string;
+  studentId: string;
+  planId: string;
+  planName: string;
+  dayId: string;
+  dayName: string;
+  startedAt: string; // ISO
+  finishedAt: string; // ISO
+  durationSeconds: number;
+  blocks: SessionBlock[];
+  generalNote: string;
+}

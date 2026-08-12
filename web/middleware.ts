@@ -8,7 +8,8 @@ export async function middleware(req: NextRequest) {
     pathname === '/login' ||
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/logout') ||
-    pathname.startsWith('/api/student');
+    pathname.startsWith('/api/student') ||
+    pathname.startsWith('/portal');
 
   if (isPublic) return NextResponse.next();
 

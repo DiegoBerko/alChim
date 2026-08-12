@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import type { Student, StudentNote, StudentAspect, Payment, Exercise, Plan, PlanDay, PlanBlock } from './types';
+import type { Student, StudentNote, StudentAspect, Payment, Exercise, Plan, PlanDay, PlanBlock, GymSession } from './types';
 
 // ─── Link Code Generation ───────────────────────────────────────────────────
 
@@ -294,6 +294,31 @@ export async function publishPlan(studentId: string, planId: string): Promise<vo
     .collection('plans')
     .doc(planId)
     .update({ status: 'published', publishedAt: new Date().toISOString() });
+}
+
+// ─── Gym Sessions ─────────────────────────────────────────────────────────────
+
+export async function saveGymSession(
+  studentId: string,
+  data: Omit<GymSession, 'id' | 'studentId'>
+): Promise<GymSession> {
+  const payload = { ...data, studentId };
+  const ref = await db
+    .collection('students')
+    .doc(studentId)
+    .collection('gymSessions')
+    .add(payload);
+  return { id: ref.id, ...payload };
+}
+
+export async function getGymSessions(studentId: string): Promise<GymSession[]> {
+  const snap = await db
+    .collection('students')
+    .doc(studentId)
+    .collection('gymSessions')
+    .orderBy('startedAt', 'desc')
+    .get();
+  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as GymSession));
 }
 
 export async function createPlanFromExisting(
