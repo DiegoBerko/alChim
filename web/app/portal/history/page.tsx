@@ -42,6 +42,33 @@ function countDoneSets(blocks: SessionBlock[]): { done: number; total: number } 
   return { done, total };
 }
 
+function getExercisePreview(blocks: SessionBlock[]): string {
+  const names: string[] = [];
+  for (const b of blocks) {
+    for (const ex of b.exercises) {
+      names.push(ex.exerciseName);
+      if (names.length === 3) return names.join(', ') + (b.exercises.length + blocks.reduce((a, bl) => a + bl.exercises.length, 0) > 3 ? '...' : '');
+    }
+  }
+  return names.join(', ');
+}
+
+function calcStreak(sessions: GymSession[]): number {
+  if (sessions.length === 0) return 0;
+  const uniqueDates = Array.from(new Set(sessions.map((s) => s.startedAt.slice(0, 10)))).sort().reverse();
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  if (uniqueDates[0] !== today && uniqueDates[0] !== yesterday) return 0;
+  let streak = 1;
+  for (let i = 1; i < uniqueDates.length; i++) {
+    const prev = new Date(uniqueDates[i - 1]).getTime();
+    const curr = new Date(uniqueDates[i]).getTime();
+    if (Math.round((prev - curr) / 86400000) === 1) streak++;
+    else break;
+  }
+  return streak;
+}
+
 const EFFORT_LABELS: Record<EffortLevel, string> = {
   facil: 'Fácil',
   normal: 'Normal',
@@ -92,6 +119,11 @@ function SessionCard({ session }: { session: GymSession }) {
             </p>
           </div>
         </div>
+        {!expanded && (
+          <p className="text-xs mt-2 truncate" style={{ color: '#666' }}>
+            {getExercisePreview(session.blocks)}
+          </p>
+        )}
         <div className="flex items-center justify-end mt-2">
           <svg
             style={{ color: '#888', transform: expanded ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}
@@ -379,11 +411,38 @@ export default function HistoryPage() {
     );
   }
 
+  const streak = calcStreak(sessions);
+  const totalSessions = sessions.length;
+
   return (
     <div className="space-y-5">
-      <h1 className="text-2xl font-bold" style={{ color: '#f5f5f5' }}>
-        Historial
-      </h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold" style={{ color: '#f5f5f5' }}>
+          Historial
+        </h1>
+        {totalSessions > 0 && (
+          <div className="flex items-center gap-3">
+            {streak > 0 && (
+              <div className="text-right">
+                <p className="text-lg font-bold leading-none" style={{ color: '#F5A623' }}>
+                  {streak} 🔥
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: '#888' }}>
+                  {streak === 1 ? 'día' : 'días seguidos'}
+                </p>
+              </div>
+            )}
+            <div className="text-right">
+              <p className="text-lg font-bold leading-none" style={{ color: '#f5f5f5' }}>
+                {totalSessions}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: '#888' }}>
+                {totalSessions === 1 ? 'sesión' : 'sesiones'}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Tab bar */}
       <div

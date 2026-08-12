@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Plan, PlanDay } from '@/lib/types';
+import type { Plan, PlanDay, GymSession } from '@/lib/types';
 import { getPortalCode, getActiveSession } from '@/lib/student-session';
 
 interface StudentInfo {
@@ -24,6 +24,22 @@ function normalizePlanDays(plan: Plan): PlanDay[] {
   ];
 }
 
+function calcStreak(sessions: GymSession[]): number {
+  if (sessions.length === 0) return 0;
+  const uniqueDates = Array.from(new Set(sessions.map((s) => s.startedAt.slice(0, 10)))).sort().reverse();
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  if (uniqueDates[0] !== today && uniqueDates[0] !== yesterday) return 0;
+  let streak = 1;
+  for (let i = 1; i < uniqueDates.length; i++) {
+    const prev = new Date(uniqueDates[i - 1]).getTime();
+    const curr = new Date(uniqueDates[i]).getTime();
+    if (Math.round((prev - curr) / 86400000) === 1) streak++;
+    else break;
+  }
+  return streak;
+}
+
 export default function PlansPage() {
   const router = useRouter();
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -32,6 +48,7 @@ export default function PlansPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<ReturnType<typeof getActiveSession>>(null);
+  const [sessionStats, setSessionStats] = useState<{ total: number; streak: number } | null>(null);
 
   useEffect(() => {
     const code = getPortalCode();
@@ -43,7 +60,7 @@ export default function PlansPage() {
     const saved = getActiveSession();
     setActiveSession(saved);
 
-    fetch(`/api/student/plans?code=${code}`)
+    const plansPromise = fetch(`/api/student/plans?code=${code}`)
       .then((res) => {
         if (!res.ok) throw new Error('fetch failed');
         return res.json();
@@ -51,10 +68,18 @@ export default function PlansPage() {
       .then((data) => {
         setStudent(data.student);
         setPlans(data.plans);
-        if (data.plans.length > 0) {
-          setExpandedPlanId(data.plans[0].id);
-        }
+        if (data.plans.length > 0) setExpandedPlanId(data.plans[0].id);
+      });
+
+    const sessionsPromise = fetch(`/api/student/sessions?code=${code}`)
+      .then((r) => r.json())
+      .then((data: { sessions: GymSession[] }) => {
+        const sessions = data.sessions ?? [];
+        setSessionStats({ total: sessions.length, streak: calcStreak(sessions) });
       })
+      .catch(() => {/* stats are optional */});
+
+    Promise.all([plansPromise, sessionsPromise])
       .catch(() => setError('No se pudo cargar los planes. Intentá de nuevo.'))
       .finally(() => setLoading(false));
   }, [router]);
@@ -103,13 +128,37 @@ export default function PlansPage() {
   return (
     <div className="space-y-6">
       {student && (
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: '#f5f5f5' }}>
-            Hola, {student.name}!
-          </h1>
-          <p className="text-sm mt-1" style={{ color: '#888' }}>
-            Elegí un plan y día para entrenar
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold" style={{ color: '#f5f5f5' }}>
+              Hola, {student.name}!
+            </h1>
+            <p className="text-sm mt-1" style={{ color: '#888' }}>
+              Elegí un plan y día para entrenar
+            </p>
+          </div>
+          {sessionStats && sessionStats.total > 0 && (
+            <div className="flex items-center gap-3 shrink-0 pt-1">
+              {sessionStats.streak > 0 && (
+                <div className="text-right">
+                  <p className="text-lg font-bold leading-none" style={{ color: '#F5A623' }}>
+                    {sessionStats.streak} 🔥
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: '#888' }}>
+                    {sessionStats.streak === 1 ? 'día' : 'días'}
+                  </p>
+                </div>
+              )}
+              <div className="text-right">
+                <p className="text-lg font-bold leading-none" style={{ color: '#f5f5f5' }}>
+                  {sessionStats.total}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: '#888' }}>
+                  {sessionStats.total === 1 ? 'sesión' : 'sesiones'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

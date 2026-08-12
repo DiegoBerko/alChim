@@ -80,6 +80,7 @@ function buildSessionFromDay(planId: string, planName: string, day: PlanDay): Ac
               actualReps: s.targetReps,
               actualWeight: s.targetWeight,
               done: false,
+              effort: 'normal' as EffortLevel,
             })),
           })),
       })),
@@ -105,12 +106,13 @@ function SetRow({
 }) {
   function cycleEffort() {
     if (disabled) return;
-    const cur = set.effort ?? 'facil';
+    const cur = set.effort ?? 'normal';
     const idx = EFFORT_CYCLE.indexOf(cur);
     onUpdate({ effort: EFFORT_CYCLE[(idx + 1) % EFFORT_CYCLE.length] });
   }
 
-  const color = set.effort ? EFFORT_COLOR[set.effort] : '#444';
+  const effort = set.effort ?? 'normal';
+  const color = EFFORT_COLOR[effort];
 
   return (
     <div className="flex items-center gap-2 py-1.5">
@@ -165,15 +167,16 @@ function SetRow({
         disabled={disabled}
         className="ml-auto px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 transition-colors"
         style={{
-          backgroundColor: set.effort ? `${color}20` : '#1a1a1a',
-          border: `1px solid ${set.effort ? color : '#2a2a2a'}`,
-          color: set.effort ? color : '#555',
+          backgroundColor: `${color}20`,
+          border: `1px solid ${color}`,
+          color,
           minWidth: '2.5rem',
           textAlign: 'center',
+          opacity: disabled ? 0.4 : 1,
         }}
-        title={set.effort ? EFFORT_LABEL[set.effort] : 'Marcar esfuerzo'}
+        title={EFFORT_LABEL[effort]}
       >
-        {set.effort ? EFFORT_SHORT[set.effort] : '—'}
+        {EFFORT_SHORT[effort]}
       </button>
     </div>
   );
@@ -233,6 +236,11 @@ function ExerciseCard({
             {isDone && <span className="mr-1.5">✓</span>}
             {exercise.exerciseName}
           </p>
+          {exercise.notes && !isDone && (
+            <p className="text-xs mt-0.5 truncate" style={{ color: '#666', fontStyle: 'italic' }}>
+              {exercise.notes}
+            </p>
+          )}
           {(collapsed || isDone) && (
             <p className="text-xs mt-0.5 truncate" style={{ color: '#555' }}>
               {exercise.sets.length} serie{exercise.sets.length !== 1 ? 's' : ''}
@@ -259,13 +267,6 @@ function ExerciseCard({
       {/* Body — hidden when collapsed or done */}
       {!collapsed && !isDone && (
         <div className="px-3 pt-2 pb-3">
-          {/* Plan notes (read-only hint) */}
-          {exercise.notes && (
-            <p className="text-xs mb-2 px-1" style={{ color: '#666', fontStyle: 'italic' }}>
-              {exercise.notes}
-            </p>
-          )}
-
           {/* Target header */}
           <div className="flex items-center gap-2 px-1 mb-1">
             <span className="w-6" />
@@ -403,43 +404,104 @@ function FinishModal({
   saving: boolean; saveError: string | null; onNoteChange: (note: string) => void;
 }) {
   const { done, total } = countProgress(session.blocks);
-  const allDone = done === total && total > 0;
+  const allExDone = done === total && total > 0;
+
+  let setsDone = 0, setsTotal = 0;
+  for (const b of session.blocks) {
+    for (const ex of b.exercises) {
+      for (const s of ex.sets) { setsTotal++; if (s.done) setsDone++; }
+    }
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.9)' }}>
-      <div className="w-full max-w-sm rounded-2xl p-6 space-y-5" style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
-        <h2 className="font-bold text-xl" style={{ color: '#f5f5f5' }}>Finalizar sesión</h2>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center"
+      style={{ backgroundColor: 'rgba(0,0,0,0.9)' }}
+    >
+      <div
+        className="w-full max-w-sm rounded-t-2xl flex flex-col"
+        style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a', maxHeight: '90vh' }}
+      >
+        {/* Fixed header */}
+        <div className="px-6 pt-6 pb-4 shrink-0">
+          <h2 className="font-bold text-xl mb-4" style={{ color: '#f5f5f5' }}>Finalizar sesión</h2>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-xl p-4 text-center" style={{ backgroundColor: '#242424' }}>
-            <p className="text-xs mb-1 font-medium uppercase tracking-wider" style={{ color: '#555' }}>Tiempo</p>
-            <p className="font-bold text-xl font-mono" style={{ color: '#F5A623' }}>{formatTime(elapsed)}</p>
-          </div>
-          <div className="rounded-xl p-4 text-center" style={{ backgroundColor: '#242424' }}>
-            <p className="text-xs mb-1 font-medium uppercase tracking-wider" style={{ color: '#555' }}>Ejercicios</p>
-            <p className="font-bold text-xl" style={{ color: allDone ? '#22c55e' : '#f5f5f5' }}>
-              {done}/{total}
-            </p>
+          {/* 3 stats */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#242424' }}>
+              <p className="text-xs mb-1 font-medium uppercase tracking-wider" style={{ color: '#555' }}>Tiempo</p>
+              <p className="font-bold text-lg font-mono" style={{ color: '#F5A623' }}>{formatTime(elapsed)}</p>
+            </div>
+            <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#242424' }}>
+              <p className="text-xs mb-1 font-medium uppercase tracking-wider" style={{ color: '#555' }}>Ejercicios</p>
+              <p className="font-bold text-lg" style={{ color: allExDone ? '#22c55e' : '#f5f5f5' }}>
+                {done}/{total}
+              </p>
+            </div>
+            <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#242424' }}>
+              <p className="text-xs mb-1 font-medium uppercase tracking-wider" style={{ color: '#555' }}>Series</p>
+              <p className="font-bold text-lg" style={{ color: setsDone === setsTotal && setsTotal > 0 ? '#22c55e' : '#f5f5f5' }}>
+                {setsDone}/{setsTotal}
+              </p>
+            </div>
           </div>
         </div>
 
-        <div>
-          <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#555' }}>
-            Nota general
-          </label>
-          <textarea
-            value={session.generalNote}
-            onChange={(e) => onNoteChange(e.target.value)}
-            rows={3}
-            placeholder="¿Cómo fue el entrenamiento?"
-            className="w-full px-3 py-2.5 rounded-xl text-sm resize-none outline-none"
-            style={{ backgroundColor: '#242424', border: '1px solid #2a2a2a', color: '#f5f5f5' }}
-          />
+        {/* Scrollable body */}
+        <div className="overflow-y-auto px-6 space-y-4" style={{ borderTop: '1px solid #2a2a2a' }}>
+          {/* Exercise summary */}
+          <div className="pt-4 space-y-3">
+            {session.blocks.map((block) => (
+              <div key={block.planBlockId}>
+                <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#F5A623' }}>
+                  {block.name}
+                </p>
+                <div className="space-y-1">
+                  {block.exercises.map((ex) => {
+                    const exSummary = buildSetSummary(ex.sets);
+                    return (
+                      <div key={ex.planExerciseId} className="flex items-start gap-2 py-1.5 px-3 rounded-lg" style={{ backgroundColor: '#242424' }}>
+                        <span className="text-xs mt-0.5 shrink-0 font-bold" style={{ color: ex.done ? '#F5A623' : '#555' }}>
+                          {ex.done ? '✓' : '○'}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium" style={{ color: ex.done ? '#f5f5f5' : '#888' }}>
+                            {ex.exerciseName}
+                          </p>
+                          {exSummary && (
+                            <p className="text-xs mt-0.5" style={{ color: '#555' }}>{exSummary}</p>
+                          )}
+                          {ex.studentNote && (
+                            <p className="text-xs mt-0.5 italic" style={{ color: '#666' }}>{ex.studentNote}</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* General note */}
+          <div className="pb-2">
+            <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#555' }}>
+              Nota general
+            </label>
+            <textarea
+              value={session.generalNote}
+              onChange={(e) => onNoteChange(e.target.value)}
+              rows={3}
+              placeholder="¿Cómo fue el entrenamiento?"
+              className="w-full px-3 py-2.5 rounded-xl text-sm resize-none outline-none"
+              style={{ backgroundColor: '#242424', border: '1px solid #2a2a2a', color: '#f5f5f5' }}
+            />
+          </div>
         </div>
 
-        {saveError && <p className="text-sm text-center" style={{ color: '#ef4444' }}>{saveError}</p>}
-
-        <div className="space-y-2">
+        {/* Fixed footer */}
+        <div className="px-6 pb-6 pt-4 space-y-2 shrink-0" style={{ borderTop: '1px solid #2a2a2a' }}>
+          {saveError && <p className="text-sm text-center mb-2" style={{ color: '#ef4444' }}>{saveError}</p>}
           <button onClick={onSave} disabled={saving} className="w-full py-3.5 rounded-xl font-bold text-base transition-opacity"
             style={{ backgroundColor: '#F5A623', color: '#0D0D0D', opacity: saving ? 0.6 : 1 }}>
             {saving ? 'Guardando...' : 'Guardar sesión'}
@@ -472,7 +534,9 @@ function SessionPageInner() {
   const [showFinish, setShowFinish] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showSaved, setShowSaved] = useState(false);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedIndicatorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Wake Lock ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -536,7 +600,12 @@ function SessionPageInner() {
   useEffect(() => {
     if (!session) return;
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => saveActiveSession(session), 500);
+    autoSaveTimer.current = setTimeout(() => {
+      saveActiveSession(session);
+      setShowSaved(true);
+      if (savedIndicatorTimer.current) clearTimeout(savedIndicatorTimer.current);
+      savedIndicatorTimer.current = setTimeout(() => setShowSaved(false), 2000);
+    }, 500);
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
   }, [session]);
 
@@ -705,6 +774,11 @@ function SessionPageInner() {
               <p className="text-xs truncate" style={{ color: '#888' }}>{session.dayName}</p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
+              {showSaved && (
+                <span className="text-xs font-medium transition-opacity" style={{ color: '#22c55e' }}>
+                  ✓ Guardado
+                </span>
+              )}
               <span className="font-mono text-xl font-bold" style={{ color: '#F5A623' }}>
                 {formatTime(elapsed)}
               </span>
