@@ -12,13 +12,41 @@ import {
   ActiveSession,
 } from '@/lib/student-session';
 
-// ─── Helper: build session from plan day ─────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-function buildSessionFromDay(
-  planId: string,
-  planName: string,
-  day: PlanDay
-): ActiveSession {
+const EFFORT_CYCLE: EffortLevel[] = ['facil', 'normal', 'intenso', 'muy_intenso'];
+const EFFORT_LABEL: Record<EffortLevel, string> = {
+  facil: 'Fácil', normal: 'Normal', intenso: 'Intenso', muy_intenso: 'Máx',
+};
+const EFFORT_SHORT: Record<EffortLevel, string> = {
+  facil: 'F', normal: 'N', intenso: 'I', muy_intenso: 'MI',
+};
+const EFFORT_COLOR: Record<EffortLevel, string> = {
+  facil: '#4CAF50', normal: '#F5A623', intenso: '#FF9800', muy_intenso: '#F44336',
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function buildSetSummary(sets: SessionSet[]): string {
+  return sets
+    .map((s) => {
+      const reps = s.actualReps || s.targetReps;
+      const w = s.actualWeight ?? s.targetWeight;
+      if (s.mode === 'seconds') return w ? `${reps}''×${w}kg` : `${reps}''`;
+      return w ? `${reps}×${w}kg` : reps;
+    })
+    .join(' / ');
+}
+
+function buildSessionFromDay(planId: string, planName: string, day: PlanDay): ActiveSession {
   return {
     planId,
     planName,
@@ -43,6 +71,7 @@ function buildSessionFromDay(
             mode: ex.mode,
             notes: ex.notes,
             studentNote: '',
+            done: false,
             sets: ex.sets.map((s) => ({
               setNumber: s.setNumber,
               targetReps: s.targetReps,
@@ -51,53 +80,288 @@ function buildSessionFromDay(
               actualReps: s.targetReps,
               actualWeight: s.targetWeight,
               done: false,
-              effort: undefined,
             })),
           })),
       })),
   };
 }
 
-// ─── Timer display ────────────────────────────────────────────────────────────
-
-function formatTime(seconds: number): string {
-  if (seconds < 3600) {
-    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  }
-  const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
-  const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
-  const s = (seconds % 60).toString().padStart(2, '0');
-  return `${h}:${m}:${s}`;
-}
-
-// ─── Effort pill config ───────────────────────────────────────────────────────
-
-const EFFORT_PILLS: { value: EffortLevel; label: string }[] = [
-  { value: 'facil', label: 'F' },
-  { value: 'normal', label: 'N' },
-  { value: 'intenso', label: 'I' },
-  { value: 'muy_intenso', label: 'MI' },
-];
-
-// ─── Session progress ─────────────────────────────────────────────────────────
-
-function countSets(blocks: SessionBlock[]): { done: number; total: number } {
-  let done = 0;
-  let total = 0;
-  for (const block of blocks) {
-    for (const ex of block.exercises) {
-      for (const s of ex.sets) {
-        total++;
-        if (s.done) done++;
-      }
-    }
-  }
+function countProgress(blocks: SessionBlock[]): { done: number; total: number } {
+  let done = 0, total = 0;
+  for (const b of blocks) for (const ex of b.exercises) { total++; if (ex.done) done++; }
   return { done, total };
 }
 
-// ─── Conflict dialog ─────────────────────────────────────────────────────────
+// ─── Set Row ──────────────────────────────────────────────────────────────────
+
+function SetRow({
+  set,
+  disabled,
+  onUpdate,
+}: {
+  set: SessionSet;
+  disabled: boolean;
+  onUpdate: (u: Partial<SessionSet>) => void;
+}) {
+  function cycleEffort() {
+    if (disabled) return;
+    const cur = set.effort ?? 'facil';
+    const idx = EFFORT_CYCLE.indexOf(cur);
+    onUpdate({ effort: EFFORT_CYCLE[(idx + 1) % EFFORT_CYCLE.length] });
+  }
+
+  const color = set.effort ? EFFORT_COLOR[set.effort] : '#444';
+
+  return (
+    <div className="flex items-center gap-2 py-1.5">
+      {/* Set number */}
+      <span className="w-6 text-center text-xs font-bold shrink-0" style={{ color: '#555' }}>
+        S{set.setNumber}
+      </span>
+
+      {/* Reps */}
+      <input
+        type="text"
+        value={set.actualReps}
+        onChange={(e) => onUpdate({ actualReps: e.target.value })}
+        disabled={disabled}
+        inputMode="numeric"
+        className="w-14 px-2 py-1.5 rounded-lg text-sm text-center outline-none transition-colors"
+        style={{
+          backgroundColor: disabled ? '#111' : '#0D0D0D',
+          border: `1px solid #2a2a2a`,
+          color: disabled ? '#555' : '#f5f5f5',
+        }}
+      />
+      <span className="text-xs shrink-0" style={{ color: '#444' }}>
+        {set.mode === 'seconds' ? 'seg' : 'reps'}
+      </span>
+
+      <span className="text-xs shrink-0" style={{ color: '#444' }}>×</span>
+
+      {/* Weight */}
+      <input
+        type="number"
+        value={set.actualWeight ?? ''}
+        onChange={(e) =>
+          onUpdate({ actualWeight: e.target.value === '' ? undefined : parseFloat(e.target.value) })
+        }
+        disabled={disabled}
+        min={0}
+        step={0.5}
+        placeholder="—"
+        className="w-14 px-2 py-1.5 rounded-lg text-sm text-center outline-none transition-colors"
+        style={{
+          backgroundColor: disabled ? '#111' : '#0D0D0D',
+          border: `1px solid #2a2a2a`,
+          color: disabled ? '#555' : '#f5f5f5',
+        }}
+      />
+      <span className="text-xs shrink-0" style={{ color: '#444' }}>kg</span>
+
+      {/* Effort cycling pill */}
+      <button
+        onClick={cycleEffort}
+        disabled={disabled}
+        className="ml-auto px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 transition-colors"
+        style={{
+          backgroundColor: set.effort ? `${color}20` : '#1a1a1a',
+          border: `1px solid ${set.effort ? color : '#2a2a2a'}`,
+          color: set.effort ? color : '#555',
+          minWidth: '2.5rem',
+          textAlign: 'center',
+        }}
+        title={set.effort ? EFFORT_LABEL[set.effort] : 'Marcar esfuerzo'}
+      >
+        {set.effort ? EFFORT_SHORT[set.effort] : '—'}
+      </button>
+    </div>
+  );
+}
+
+// ─── Exercise Card ────────────────────────────────────────────────────────────
+
+function ExerciseCard({
+  exercise,
+  onUpdateSet,
+  onUpdateNote,
+  onUpdateEffort,
+  onToggleDone,
+}: {
+  exercise: SessionExercise;
+  onUpdateSet: (si: number, u: Partial<SessionSet>) => void;
+  onUpdateNote: (note: string) => void;
+  onUpdateEffort: (effort: EffortLevel | undefined) => void;
+  onToggleDone: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const isDone = !!exercise.done;
+
+  // Auto-collapse on done
+  useEffect(() => { if (isDone) setCollapsed(true); }, [isDone]);
+
+  const summary = buildSetSummary(exercise.sets);
+
+  return (
+    <div
+      className="rounded-xl overflow-hidden transition-all"
+      style={{
+        backgroundColor: '#1a1a1a',
+        border: isDone ? '1px solid rgba(245,166,35,0.4)' : '1px solid #2a2a2a',
+      }}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
+        style={{ borderBottom: collapsed ? 'none' : '1px solid #222' }}
+        onClick={() => !isDone && setCollapsed((v) => !v)}
+      >
+        {/* Collapse chevron */}
+        {!isDone && (
+          <span className="text-xs shrink-0" style={{ color: '#444' }}>
+            {collapsed ? '▼' : '▲'}
+          </span>
+        )}
+
+        {/* Name + summary */}
+        <div className="flex-1 min-w-0">
+          <p
+            className="font-semibold text-sm truncate"
+            style={{ color: isDone ? '#F5A623' : '#f5f5f5' }}
+          >
+            {isDone && <span className="mr-1.5">✓</span>}
+            {exercise.exerciseName}
+          </p>
+          {(collapsed || isDone) && (
+            <p className="text-xs mt-0.5 truncate" style={{ color: '#555' }}>
+              {exercise.sets.length} serie{exercise.sets.length !== 1 ? 's' : ''}
+              {summary ? `  ·  ${summary}` : ''}
+            </p>
+          )}
+        </div>
+
+        {/* Done button */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleDone(); }}
+          className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all text-sm font-bold"
+          style={{
+            backgroundColor: isDone ? '#F5A623' : 'transparent',
+            border: isDone ? 'none' : '2px solid #444',
+            color: isDone ? '#0D0D0D' : '#555',
+          }}
+          title={isDone ? 'Desmarcar' : 'Marcar como hecho'}
+        >
+          {isDone ? '✓' : '○'}
+        </button>
+      </div>
+
+      {/* Body — hidden when collapsed or done */}
+      {!collapsed && !isDone && (
+        <div className="px-3 pt-2 pb-3">
+          {/* Plan notes (read-only hint) */}
+          {exercise.notes && (
+            <p className="text-xs mb-2 px-1" style={{ color: '#666', fontStyle: 'italic' }}>
+              {exercise.notes}
+            </p>
+          )}
+
+          {/* Target header */}
+          <div className="flex items-center gap-2 px-1 mb-1">
+            <span className="w-6" />
+            <span className="w-14 text-center text-xs" style={{ color: '#444' }}>Reps</span>
+            <span className="text-xs" style={{ color: 'transparent' }}>seg</span>
+            <span className="text-xs" style={{ color: 'transparent' }}>×</span>
+            <span className="w-14 text-center text-xs" style={{ color: '#444' }}>Peso</span>
+          </div>
+
+          {/* Set rows */}
+          <div className="divide-y" style={{ borderColor: '#1a1a1a' }}>
+            {exercise.sets.map((set, si) => (
+              <SetRow
+                key={set.setNumber}
+                set={set}
+                disabled={false}
+                onUpdate={(u) => onUpdateSet(si, u)}
+              />
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid #222' }}>
+            <button
+              onClick={() => setShowDetails((v) => !v)}
+              className="text-xs transition-colors"
+              style={{ color: exercise.studentNote || exercise.done ? '#F5A623' : '#555' }}
+            >
+              {showDetails
+                ? '▲ cerrar'
+                : exercise.studentNote
+                ? `nota ↓`
+                : 'esfuerzo · notas ›'}
+            </button>
+          </div>
+
+          {/* Details panel */}
+          {showDetails && (
+            <div
+              className="mt-2 p-3 rounded-xl space-y-3"
+              style={{ backgroundColor: '#111', border: '1px solid #222' }}
+            >
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#555' }}>
+                  Esfuerzo general
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {EFFORT_CYCLE.map((e) => {
+                    const active = exercise.sets.every((s) => s.effort === e) && exercise.sets.length > 0;
+                    return (
+                      <button
+                        key={e}
+                        onClick={() => {
+                          // Apply effort to all sets
+                          exercise.sets.forEach((_, si) => onUpdateSet(si, { effort: e }));
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                        style={{
+                          backgroundColor: active ? `${EFFORT_COLOR[e]}20` : '#1a1a1a',
+                          border: `1px solid ${active ? EFFORT_COLOR[e] : '#2a2a2a'}`,
+                          color: active ? EFFORT_COLOR[e] : '#888',
+                        }}
+                      >
+                        {EFFORT_LABEL[e]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#555' }}>
+                  Nota del ejercicio
+                </p>
+                <textarea
+                  value={exercise.studentNote}
+                  onChange={(e) => onUpdateNote(e.target.value)}
+                  rows={2}
+                  placeholder="¿Algo para recordar de este ejercicio?"
+                  className="w-full px-3 py-2 rounded-lg text-xs resize-none outline-none"
+                  style={{
+                    backgroundColor: '#0D0D0D',
+                    border: '1px solid #2a2a2a',
+                    color: '#f5f5f5',
+                  }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Conflict dialog ──────────────────────────────────────────────────────────
 
 function ConflictDialog({
   existingDayName,
@@ -109,26 +373,20 @@ function ConflictDialog({
   onGoBack: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}>
       <div className="w-full max-w-sm rounded-2xl p-6 space-y-4" style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
         <h2 className="font-bold text-lg" style={{ color: '#f5f5f5' }}>Sesión en curso</h2>
         <p className="text-sm" style={{ color: '#888' }}>
-          Hay una sesión de <span style={{ color: '#F5A623' }}>{existingDayName}</span> sin terminar. ¿Qué querés hacer?
+          Tenés una sesión de <span style={{ color: '#F5A623' }}>{existingDayName}</span> sin terminar.
         </p>
         <div className="space-y-2">
-          <button
-            onClick={onDiscard}
-            className="w-full py-3 rounded-xl font-semibold text-sm"
-            style={{ backgroundColor: '#ef4444', color: '#fff' }}
-          >
-            Descartar sesión anterior y empezar nueva
+          <button onClick={onDiscard} className="w-full py-3 rounded-xl font-semibold text-sm"
+            style={{ backgroundColor: '#ef4444', color: '#fff' }}>
+            Descartar y empezar nueva
           </button>
-          <button
-            onClick={onGoBack}
-            className="w-full py-3 rounded-xl font-semibold text-sm"
-            style={{ backgroundColor: '#242424', color: '#f5f5f5', border: '1px solid #2a2a2a' }}
-          >
-            Volver y retomar sesión anterior
+          <button onClick={onGoBack} className="w-full py-3 rounded-xl font-semibold text-sm"
+            style={{ backgroundColor: '#242424', color: '#f5f5f5', border: '1px solid #2a2a2a' }}>
+            Volver y retomar
           </button>
         </div>
       </div>
@@ -139,79 +397,55 @@ function ConflictDialog({
 // ─── Finish modal ─────────────────────────────────────────────────────────────
 
 function FinishModal({
-  session,
-  elapsed,
-  onClose,
-  onSave,
-  saving,
-  saveError,
-  onNoteChange,
+  session, elapsed, onClose, onSave, saving, saveError, onNoteChange,
 }: {
-  session: ActiveSession;
-  elapsed: number;
-  onClose: () => void;
-  onSave: () => void;
-  saving: boolean;
-  saveError: string | null;
-  onNoteChange: (note: string) => void;
+  session: ActiveSession; elapsed: number; onClose: () => void; onSave: () => void;
+  saving: boolean; saveError: string | null; onNoteChange: (note: string) => void;
 }) {
-  const { done, total } = countSets(session.blocks);
+  const { done, total } = countProgress(session.blocks);
+  const allDone = done === total && total > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.9)' }}>
       <div className="w-full max-w-sm rounded-2xl p-6 space-y-5" style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
         <h2 className="font-bold text-xl" style={{ color: '#f5f5f5' }}>Finalizar sesión</h2>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#242424' }}>
-            <p className="text-xs mb-1" style={{ color: '#888' }}>Tiempo total</p>
-            <p className="font-bold text-lg" style={{ color: '#F5A623' }}>{formatTime(elapsed)}</p>
+          <div className="rounded-xl p-4 text-center" style={{ backgroundColor: '#242424' }}>
+            <p className="text-xs mb-1 font-medium uppercase tracking-wider" style={{ color: '#555' }}>Tiempo</p>
+            <p className="font-bold text-xl font-mono" style={{ color: '#F5A623' }}>{formatTime(elapsed)}</p>
           </div>
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#242424' }}>
-            <p className="text-xs mb-1" style={{ color: '#888' }}>Series hechas</p>
-            <p className="font-bold text-lg" style={{ color: done === total && total > 0 ? '#22c55e' : '#f5f5f5' }}>
+          <div className="rounded-xl p-4 text-center" style={{ backgroundColor: '#242424' }}>
+            <p className="text-xs mb-1 font-medium uppercase tracking-wider" style={{ color: '#555' }}>Ejercicios</p>
+            <p className="font-bold text-xl" style={{ color: allDone ? '#22c55e' : '#f5f5f5' }}>
               {done}/{total}
             </p>
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-2" style={{ color: '#888' }}>
-            Nota general (opcional)
+          <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#555' }}>
+            Nota general
           </label>
           <textarea
             value={session.generalNote}
             onChange={(e) => onNoteChange(e.target.value)}
             rows={3}
             placeholder="¿Cómo fue el entrenamiento?"
-            className="w-full px-3 py-2 rounded-xl text-sm resize-none outline-none"
+            className="w-full px-3 py-2.5 rounded-xl text-sm resize-none outline-none"
             style={{ backgroundColor: '#242424', border: '1px solid #2a2a2a', color: '#f5f5f5' }}
           />
         </div>
 
-        {saveError && (
-          <p className="text-sm text-center" style={{ color: '#ef4444' }}>{saveError}</p>
-        )}
+        {saveError && <p className="text-sm text-center" style={{ color: '#ef4444' }}>{saveError}</p>}
 
         <div className="space-y-2">
-          <button
-            onClick={onSave}
-            disabled={saving}
-            className="w-full py-3 rounded-xl font-semibold"
-            style={{
-              backgroundColor: '#F5A623',
-              color: '#0D0D0D',
-              opacity: saving ? 0.7 : 1,
-            }}
-          >
+          <button onClick={onSave} disabled={saving} className="w-full py-3.5 rounded-xl font-bold text-base transition-opacity"
+            style={{ backgroundColor: '#F5A623', color: '#0D0D0D', opacity: saving ? 0.6 : 1 }}>
             {saving ? 'Guardando...' : 'Guardar sesión'}
           </button>
-          <button
-            onClick={onClose}
-            disabled={saving}
-            className="w-full py-3 rounded-xl font-semibold text-sm"
-            style={{ backgroundColor: '#242424', color: '#f5f5f5', border: '1px solid #2a2a2a' }}
-          >
+          <button onClick={onClose} disabled={saving} className="w-full py-3 rounded-xl font-semibold text-sm"
+            style={{ backgroundColor: '#242424', color: '#f5f5f5', border: '1px solid #2a2a2a' }}>
             Seguir entrenando
           </button>
         </div>
@@ -220,173 +454,7 @@ function FinishModal({
   );
 }
 
-// ─── Set row ──────────────────────────────────────────────────────────────────
-
-function SetRow({
-  set,
-  onUpdate,
-}: {
-  set: SessionSet;
-  onUpdate: (updated: Partial<SessionSet>) => void;
-}) {
-  const targetLabel =
-    set.mode === 'seconds'
-      ? `${set.targetReps}s${set.targetWeight ? ` · ${set.targetWeight}kg` : ''}`
-      : `${set.targetReps} reps${set.targetWeight ? ` · ${set.targetWeight}kg` : ''}`;
-
-  return (
-    <div
-      className="rounded-lg p-2.5 transition-colors"
-      style={{
-        backgroundColor: set.done ? 'rgba(245,166,35,0.08)' : '#0D0D0D',
-        border: set.done ? '1px solid rgba(245,166,35,0.3)' : '1px solid #2a2a2a',
-      }}
-    >
-      <div className="flex items-center gap-2">
-        {/* Set number */}
-        <span
-          className="text-xs font-bold w-5 text-center shrink-0"
-          style={{ color: '#888' }}
-        >
-          {set.setNumber}
-        </span>
-
-        {/* Target */}
-        <span className="text-xs w-16 shrink-0" style={{ color: '#888' }}>
-          {targetLabel}
-        </span>
-
-        {/* Actual reps */}
-        <input
-          type="text"
-          value={set.actualReps}
-          onChange={(e) => onUpdate({ actualReps: e.target.value })}
-          placeholder={set.mode === 'seconds' ? 'seg' : 'reps'}
-          className="w-14 px-2 py-1.5 rounded-lg text-sm text-center outline-none"
-          style={{
-            backgroundColor: '#1a1a1a',
-            border: '1px solid #2a2a2a',
-            color: '#f5f5f5',
-          }}
-        />
-
-        {/* Actual weight */}
-        <input
-          type="number"
-          value={set.actualWeight ?? ''}
-          onChange={(e) => onUpdate({ actualWeight: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
-          placeholder="kg"
-          min={0}
-          step={0.5}
-          className="w-14 px-2 py-1.5 rounded-lg text-sm text-center outline-none"
-          style={{
-            backgroundColor: '#1a1a1a',
-            border: '1px solid #2a2a2a',
-            color: '#f5f5f5',
-          }}
-        />
-
-        {/* Done button */}
-        <button
-          onClick={() => onUpdate({ done: !set.done })}
-          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ml-auto"
-          style={{
-            backgroundColor: set.done ? '#F5A623' : '#1a1a1a',
-            border: set.done ? 'none' : '1px solid #2a2a2a',
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={set.done ? '#0D0D0D' : '#888'} strokeWidth="3">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Effort pills */}
-      <div className="flex gap-1.5 mt-2 ml-7">
-        {EFFORT_PILLS.map((pill) => (
-          <button
-            key={pill.value}
-            onClick={() => onUpdate({ effort: set.effort === pill.value ? undefined : pill.value })}
-            className="px-2 py-0.5 rounded-full text-xs font-medium transition-colors"
-            style={{
-              backgroundColor: set.effort === pill.value ? '#F5A623' : '#1a1a1a',
-              color: set.effort === pill.value ? '#0D0D0D' : '#888',
-              border: set.effort === pill.value ? 'none' : '1px solid #2a2a2a',
-            }}
-          >
-            {pill.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Exercise card ────────────────────────────────────────────────────────────
-
-function ExerciseCard({
-  exercise,
-  onUpdateSet,
-  onUpdateNote,
-}: {
-  exercise: SessionExercise;
-  onUpdateSet: (setIndex: number, updated: Partial<SessionSet>) => void;
-  onUpdateNote: (note: string) => void;
-}) {
-  const allDone = exercise.sets.length > 0 && exercise.sets.every((s) => s.done);
-
-  return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
-    >
-      <div className="px-4 py-3" style={{ borderBottom: '1px solid #2a2a2a' }}>
-        <div className="flex items-center gap-2">
-          {allDone && (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          )}
-          <h3 className="font-semibold text-sm" style={{ color: allDone ? '#22c55e' : '#f5f5f5' }}>
-            {exercise.exerciseName}
-          </h3>
-        </div>
-        {exercise.notes && (
-          <p className="text-xs mt-1" style={{ color: '#888' }}>
-            {exercise.notes}
-          </p>
-        )}
-      </div>
-
-      <div className="px-3 py-3 space-y-2">
-        {exercise.sets.map((set, si) => (
-          <SetRow
-            key={set.setNumber}
-            set={set}
-            onUpdate={(updated) => onUpdateSet(si, updated)}
-          />
-        ))}
-      </div>
-
-      <div className="px-3 pb-3">
-        <textarea
-          value={exercise.studentNote}
-          onChange={(e) => onUpdateNote(e.target.value)}
-          rows={2}
-          placeholder="Tu nota para este ejercicio..."
-          className="w-full px-3 py-2 rounded-lg text-xs resize-none outline-none"
-          style={{
-            backgroundColor: '#0D0D0D',
-            border: '1px solid #2a2a2a',
-            color: '#f5f5f5',
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ─── Main page (inner, uses useSearchParams) ──────────────────────────────────
+// ─── Main session page ────────────────────────────────────────────────────────
 
 function SessionPageInner() {
   const router = useRouter();
@@ -404,8 +472,6 @@ function SessionPageInner() {
   const [showFinish, setShowFinish] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-
-  // Debounce ref for auto-save
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Wake Lock ────────────────────────────────────────────────────────────
@@ -413,20 +479,13 @@ function SessionPageInner() {
     let lock: WakeLockSentinel | null = null;
     const acquire = async () => {
       if ('wakeLock' in navigator) {
-        try {
-          lock = await (navigator as any).wakeLock.request('screen');
-        } catch {}
+        try { lock = await (navigator as unknown as { wakeLock: { request: (t: string) => Promise<WakeLockSentinel> } }).wakeLock.request('screen'); } catch {}
       }
     };
     acquire();
-    const onVis = () => {
-      if (document.visibilityState === 'visible') acquire();
-    };
+    const onVis = () => { if (document.visibilityState === 'visible') acquire(); };
     document.addEventListener('visibilitychange', onVis);
-    return () => {
-      document.removeEventListener('visibilitychange', onVis);
-      lock?.release();
-    };
+    return () => { document.removeEventListener('visibilitychange', onVis); lock?.release(); };
   }, []);
 
   // ── Timer ────────────────────────────────────────────────────────────────
@@ -439,168 +498,160 @@ function SessionPageInner() {
     return () => clearInterval(id);
   }, [session?.startedAt]);
 
-  // ── Initialise ───────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!planId || !dayId) {
-      router.replace('/portal/plans');
-      return;
-    }
-
-    const code = getPortalCode();
-    if (!code) {
-      router.replace('/portal');
-      return;
-    }
-
-    const existing = getActiveSession();
-
-    if (existing) {
-      if (existing.planId === planId && existing.dayId === dayId) {
-        // Resume
-        setSession(existing);
-        setInitialising(false);
-        return;
-      } else {
-        // Conflict
-        setConflictSession(existing);
-        setInitialising(false);
-        return;
-      }
-    }
-
-    // Build fresh
+  // ── Load fresh session from API ──────────────────────────────────────────
+  const loadFresh = useCallback((code: string, onDone?: () => void) => {
     fetch(`/api/student/plans?code=${code}`)
       .then((r) => r.json())
       .then((data: { plans: Plan[] }) => {
         const plan = data.plans.find((p) => p.id === planId);
         if (!plan) throw new Error('plan not found');
-
         let day: PlanDay | undefined;
-        if (plan.days && plan.days.length > 0) {
-          day = plan.days.find((d) => d.id === dayId);
-        } else if (dayId === '__single__') {
-          day = { id: '__single__', name: 'Día 1', blocks: plan.blocks };
-        }
-
+        if (plan.days && plan.days.length > 0) day = plan.days.find((d) => d.id === dayId);
+        else if (dayId === '__single__') day = { id: '__single__', name: 'Día 1', blocks: plan.blocks };
         if (!day) throw new Error('day not found');
-
         const newSession = buildSessionFromDay(planId, planName || plan.name, day);
         saveActiveSession(newSession);
         setSession(newSession);
       })
-      .catch(() => {
-        router.replace('/portal/plans');
-      })
-      .finally(() => setInitialising(false));
+      .catch(() => router.replace('/portal/plans'))
+      .finally(() => { setInitialising(false); onDone?.(); });
   }, [planId, dayId, planName, router]);
 
-  // ── Auto-save on session change ──────────────────────────────────────────
+  // ── Initialise ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!planId || !dayId) { router.replace('/portal/plans'); return; }
+    const code = getPortalCode();
+    if (!code) { router.replace('/portal'); return; }
+    const existing = getActiveSession();
+    if (existing) {
+      if (existing.planId === planId && existing.dayId === dayId) {
+        setSession(existing); setInitialising(false); return;
+      }
+      setConflictSession(existing); setInitialising(false); return;
+    }
+    loadFresh(code);
+  }, [planId, dayId, loadFresh, router]);
+
+  // ── Auto-save ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!session) return;
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => {
-      saveActiveSession(session);
-    }, 500);
-    return () => {
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    };
+    autoSaveTimer.current = setTimeout(() => saveActiveSession(session), 500);
+    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
   }, [session]);
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
-  const updateSet = useCallback(
-    (blockIdx: number, exIdx: number, setIdx: number, updated: Partial<SessionSet>) => {
-      setSession((prev) => {
-        if (!prev) return prev;
-        const blocks = prev.blocks.map((block, bi) => {
-          if (bi !== blockIdx) return block;
-          return {
-            ...block,
-            exercises: block.exercises.map((ex, ei) => {
-              if (ei !== exIdx) return ex;
-              return {
+  // ── Mutators ─────────────────────────────────────────────────────────────
+  const updateSet = useCallback((bi: number, ei: number, si: number, u: Partial<SessionSet>) => {
+    setSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        blocks: prev.blocks.map((b, bIdx) =>
+          bIdx !== bi ? b : {
+            ...b,
+            exercises: b.exercises.map((ex, eIdx) =>
+              eIdx !== ei ? ex : {
                 ...ex,
-                sets: ex.sets.map((s, si) => (si === setIdx ? { ...s, ...updated } : s)),
-              };
-            }),
-          };
-        });
-        return { ...prev, blocks };
-      });
-    },
-    []
-  );
-
-  const updateNote = useCallback(
-    (blockIdx: number, exIdx: number, note: string) => {
-      setSession((prev) => {
-        if (!prev) return prev;
-        const blocks = prev.blocks.map((block, bi) => {
-          if (bi !== blockIdx) return block;
-          return {
-            ...block,
-            exercises: block.exercises.map((ex, ei) =>
-              ei !== exIdx ? ex : { ...ex, studentNote: note }
+                sets: ex.sets.map((s, sIdx) => sIdx !== si ? s : { ...s, ...u }),
+              }
             ),
-          };
-        });
-        return { ...prev, blocks };
-      });
-    },
-    []
-  );
+          }
+        ),
+      };
+    });
+  }, []);
+
+  const updateNote = useCallback((bi: number, ei: number, note: string) => {
+    setSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        blocks: prev.blocks.map((b, bIdx) =>
+          bIdx !== bi ? b : {
+            ...b,
+            exercises: b.exercises.map((ex, eIdx) =>
+              eIdx !== ei ? ex : { ...ex, studentNote: note }
+            ),
+          }
+        ),
+      };
+    });
+  }, []);
+
+  const updateEffort = useCallback((bi: number, ei: number, effort: EffortLevel | undefined) => {
+    setSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        blocks: prev.blocks.map((b, bIdx) =>
+          bIdx !== bi ? b : {
+            ...b,
+            exercises: b.exercises.map((ex, eIdx) =>
+              eIdx !== ei ? ex : {
+                ...ex,
+                sets: ex.sets.map((s) => ({ ...s, effort })),
+              }
+            ),
+          }
+        ),
+      };
+    });
+  }, []);
+
+  const toggleExDone = useCallback((bi: number, ei: number) => {
+    setSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        blocks: prev.blocks.map((b, bIdx) =>
+          bIdx !== bi ? b : {
+            ...b,
+            exercises: b.exercises.map((ex, eIdx) =>
+              eIdx !== ei ? ex : { ...ex, done: !ex.done }
+            ),
+          }
+        ),
+      };
+    });
+  }, []);
 
   const updateGeneralNote = useCallback((note: string) => {
     setSession((prev) => (prev ? { ...prev, generalNote: note } : prev));
   }, []);
 
+  // ── Save ─────────────────────────────────────────────────────────────────
   async function handleSave() {
     if (!session) return;
     const code = getPortalCode();
     if (!code) return;
-
-    setSaving(true);
-    setSaveError(null);
-
-    const finishedAt = new Date().toISOString();
-    const durationSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
-
+    setSaving(true); setSaveError(null);
     const body = {
-      planId: session.planId,
-      planName: session.planName,
-      dayId: session.dayId,
-      dayName: session.dayName,
+      planId: session.planId, planName: session.planName,
+      dayId: session.dayId, dayName: session.dayName,
       startedAt: new Date(session.startedAt).toISOString(),
-      finishedAt,
-      durationSeconds,
+      finishedAt: new Date().toISOString(),
+      durationSeconds: Math.floor((Date.now() - session.startedAt) / 1000),
       blocks: session.blocks,
       generalNote: session.generalNote,
     };
-
     try {
       const res = await fetch(`/api/student/sessions?code=${code}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error('save failed');
+      if (!res.ok) throw new Error();
       clearActiveSession();
       router.push('/portal/history');
     } catch {
-      setSaveError('No se pudo guardar. Revisá tu conexión e intentá de nuevo.');
-      setSaving(false);
+      setSaveError('No se pudo guardar. Revisá tu conexión.'); setSaving(false);
     }
   }
 
-  // ── Render states ────────────────────────────────────────────────────────
-
+  // ── Loading ───────────────────────────────────────────────────────────────
   if (initialising) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <div
-          className="w-8 h-8 rounded-full border-2 animate-spin"
-          style={{ borderColor: '#F5A623', borderTopColor: 'transparent' }}
-        />
+        <div className="w-8 h-8 rounded-full border-2 animate-spin"
+          style={{ borderColor: '#F5A623', borderTopColor: 'transparent' }} />
       </div>
     );
   }
@@ -610,30 +661,10 @@ function SessionPageInner() {
       <ConflictDialog
         existingDayName={conflictSession.dayName}
         onDiscard={() => {
-          clearActiveSession();
-          setConflictSession(null);
-          setInitialising(true);
-          // Re-trigger init by calling fetch directly
+          clearActiveSession(); setConflictSession(null); setInitialising(true);
           const code = getPortalCode();
           if (!code) { router.replace('/portal'); return; }
-          fetch(`/api/student/plans?code=${code}`)
-            .then((r) => r.json())
-            .then((data: { plans: Plan[] }) => {
-              const plan = data.plans.find((p) => p.id === planId);
-              if (!plan) throw new Error('plan not found');
-              let day: PlanDay | undefined;
-              if (plan.days && plan.days.length > 0) {
-                day = plan.days.find((d) => d.id === dayId);
-              } else if (dayId === '__single__') {
-                day = { id: '__single__', name: 'Día 1', blocks: plan.blocks };
-              }
-              if (!day) throw new Error('day not found');
-              const newSession = buildSessionFromDay(planId, planName || plan.name, day);
-              saveActiveSession(newSession);
-              setSession(newSession);
-            })
-            .catch(() => router.replace('/portal/plans'))
-            .finally(() => setInitialising(false));
+          loadFresh(code);
         }}
         onGoBack={() => router.replace('/portal/plans')}
       />
@@ -642,33 +673,38 @@ function SessionPageInner() {
 
   if (!session) return null;
 
-  const { done, total } = countSets(session.blocks);
-  const progressPct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const { done, total } = countProgress(session.blocks);
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
   return (
     <>
-      {/* Sticky header */}
+      {/* ── Sticky header ── */}
       <div
-        className="sticky top-0 z-40"
-        style={{ backgroundColor: '#1a1a1a', borderBottom: '1px solid #2a2a2a', margin: '0 -1rem', padding: '0 1rem' }}
+        className="sticky z-40"
+        style={{
+          top: 0,
+          backgroundColor: '#111',
+          borderBottom: '1px solid #222',
+          margin: '0 -1rem',
+          padding: '0 1rem',
+        }}
       >
         <div className="max-w-lg mx-auto">
-          <div className="py-3 flex items-center justify-between gap-3">
+          {/* Title row */}
+          <div className="flex items-center justify-between gap-3 py-3">
             <div className="min-w-0">
               <p className="font-bold text-sm truncate" style={{ color: '#f5f5f5' }}>
                 {session.planName}
               </p>
-              <p className="text-xs truncate" style={{ color: '#888' }}>
-                {session.dayName}
-              </p>
+              <p className="text-xs truncate" style={{ color: '#888' }}>{session.dayName}</p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
-              <span className="font-mono text-lg font-bold" style={{ color: '#F5A623' }}>
+              <span className="font-mono text-xl font-bold" style={{ color: '#F5A623' }}>
                 {formatTime(elapsed)}
               </span>
               <button
                 onClick={() => setShowFinish(true)}
-                className="px-3 py-1.5 rounded-lg text-sm font-semibold"
+                className="px-4 py-2 rounded-xl text-sm font-bold"
                 style={{ backgroundColor: '#F5A623', color: '#0D0D0D' }}
               >
                 Finalizar
@@ -677,48 +713,50 @@ function SessionPageInner() {
           </div>
 
           {/* Progress bar */}
-          <div className="pb-2">
-            <div className="flex justify-between text-xs mb-1" style={{ color: '#888' }}>
-              <span>{done}/{total} series</span>
-              <span>{progressPct}%</span>
+          <div className="pb-3">
+            <div className="flex justify-between text-xs mb-1.5" style={{ color: '#555' }}>
+              <span>{done} de {total} ejercicios</span>
+              <span>{pct}%</span>
             </div>
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#2a2a2a' }}>
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#222' }}>
               <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{ backgroundColor: '#F5A623', width: `${progressPct}%` }}
+                className="h-full rounded-full transition-all duration-500"
+                style={{ backgroundColor: '#F5A623', width: `${pct}%` }}
               />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Body */}
-      <div className="space-y-6 pt-4">
+      {/* ── Body ── */}
+      <div className="space-y-8 pt-5 pb-16">
         {session.blocks.map((block, bi) => (
           <div key={block.planBlockId}>
-            <h2
-              className="text-xs font-bold uppercase tracking-wider mb-3"
+            {/* Block header */}
+            <p
+              className="text-xs font-bold uppercase tracking-wider mb-3 px-1"
               style={{ color: '#F5A623' }}
             >
               {block.name}
-            </h2>
+            </p>
+
             <div className="space-y-3">
               {block.exercises.map((ex, ei) => (
                 <ExerciseCard
                   key={ex.planExerciseId}
                   exercise={ex}
-                  onUpdateSet={(si, updated) => updateSet(bi, ei, si, updated)}
+                  onUpdateSet={(si, u) => updateSet(bi, ei, si, u)}
                   onUpdateNote={(note) => updateNote(bi, ei, note)}
+                  onUpdateEffort={(effort) => updateEffort(bi, ei, effort)}
+                  onToggleDone={() => toggleExDone(bi, ei)}
                 />
               ))}
             </div>
           </div>
         ))}
-
-        <div style={{ height: '2rem' }} />
       </div>
 
-      {/* Finish modal */}
+      {/* ── Finish modal ── */}
       {showFinish && (
         <FinishModal
           session={session}
@@ -734,20 +772,14 @@ function SessionPageInner() {
   );
 }
 
-// ─── Exported page (wraps inner in Suspense for useSearchParams) ──────────────
-
 export default function SessionPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div
-            className="w-8 h-8 rounded-full border-2 animate-spin"
-            style={{ borderColor: '#F5A623', borderTopColor: 'transparent' }}
-          />
-        </div>
-      }
-    >
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-8 h-8 rounded-full border-2 animate-spin"
+          style={{ borderColor: '#F5A623', borderTopColor: 'transparent' }} />
+      </div>
+    }>
       <SessionPageInner />
     </Suspense>
   );

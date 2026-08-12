@@ -110,6 +110,7 @@ export interface SessionExercise {
   notes?: string;
   sets: SessionSet[];
   studentNote: string;
+  done?: boolean;
 }
 
 export interface SessionBlock {
