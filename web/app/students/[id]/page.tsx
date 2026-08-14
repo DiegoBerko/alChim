@@ -1040,10 +1040,10 @@ function HistoryTab({ studentId }: { studentId: string }) {
                           </span>
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-white">{ex.exerciseName}</p>
-                            {ex.sets.filter((s) => !s.omitted).length > 0 && (
+                            {ex.sets.filter((s) => !s.done).length > 0 && (
                               <p className="text-xs text-text-secondary mt-0.5">
                                 {ex.sets
-                                  .filter((s) => !s.omitted)
+                                  .filter((s) => !s.done)
                                   .map((s) => {
                                     const reps = s.actualReps || s.targetReps;
                                     const w = s.actualWeight ?? s.targetWeight;
