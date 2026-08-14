@@ -1228,21 +1228,23 @@ ${daysHtml}
           {/* Edit toggle */}
           {isEditing ? (
             <>
-              <button
-                onClick={() => saveDraft(plan)}
-                disabled={saving}
-                className="border border-border text-text-secondary hover:text-white hover:border-white/30 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-              >
-                {saving ? 'Guardando...' : 'Guardar borrador'}
-              </button>
               {plan.status === 'draft' ? (
-                <button
-                  onClick={() => setShowPublishConfirm(true)}
-                  disabled={publishing}
-                  className="bg-accent hover:bg-accent-hover text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
-                >
-                  {publishing ? 'Publicando...' : 'Publicar'}
-                </button>
+                <>
+                  <button
+                    onClick={() => saveDraft(plan)}
+                    disabled={saving}
+                    className="border border-border text-text-secondary hover:text-white hover:border-white/30 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                  >
+                    {saving ? 'Guardando...' : 'Guardar borrador'}
+                  </button>
+                  <button
+                    onClick={() => setShowPublishConfirm(true)}
+                    disabled={publishing}
+                    className="bg-accent hover:bg-accent-hover text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                  >
+                    {publishing ? 'Publicando...' : 'Publicar'}
+                  </button>
+                </>
               ) : (
                 <button
                   onClick={() => saveDraft(plan)}
