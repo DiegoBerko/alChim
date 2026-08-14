@@ -87,6 +87,7 @@ export interface Plan {
   blocks: PlanBlock[];
   days?: PlanDay[];
   basedOnPlanId?: string;
+  trainerNote?: string;
 }
 
 // ─── Student Portal / Session types ──────────────────────────────────────────

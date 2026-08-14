@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import type { Plan, PlanSet, SetMode } from '@/lib/types';
@@ -16,6 +16,11 @@ export default function PlansPage() {
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [shareMenuId, setShareMenuId] = useState<string | null>(null);
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
+  // trainer note editing state: planId → current note text
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState('');
+  const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
+  const noteInputRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchPlans = useCallback(async () => {
     const res = await fetch(`/api/students/${studentId}/plans`);
@@ -25,6 +30,10 @@ export default function PlansPage() {
   }, [studentId]);
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
+
+  useEffect(() => {
+    if (editingNoteId) noteInputRef.current?.focus();
+  }, [editingNoteId]);
 
   async function handleDelete(planId: string) {
     if (!confirm('¿Eliminar este plan?')) return;
@@ -83,6 +92,31 @@ export default function PlansPage() {
       );
     }
     setPublishingId(null);
+  }
+
+  function startEditNote(plan: Plan) {
+    setEditingNoteId(plan.id);
+    setNoteText(plan.trainerNote ?? '');
+  }
+
+  async function saveNote(planId: string) {
+    setSavingNoteId(planId);
+    const trimmed = noteText.trim();
+    await fetch(`/api/students/${studentId}/plans/${planId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trainerNote: trimmed || null }),
+    });
+    setPlans((prev) =>
+      prev.map((p) => p.id === planId ? { ...p, trainerNote: trimmed || undefined } : p)
+    );
+    setEditingNoteId(null);
+    setSavingNoteId(null);
+  }
+
+  function cancelNote() {
+    setEditingNoteId(null);
+    setNoteText('');
   }
 
   return (
@@ -180,14 +214,16 @@ export default function PlansPage() {
                   >
                     Editar
                   </Link>
+
+                  {/* Share button */}
                   <div className="relative">
                     <button
                       onClick={() => setShareMenuId(shareMenuId === plan.id ? null : plan.id)}
                       disabled={pdfLoadingId === plan.id || sharingId === plan.id}
-                      className="text-text-secondary hover:text-white transition-colors disabled:opacity-50 px-1 text-sm"
+                      className="border border-border text-text-secondary hover:text-white hover:border-white/30 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
                       title="Compartir"
                     >
-                      {pdfLoadingId === plan.id || sharingId === plan.id ? '...' : '↑'}
+                      {pdfLoadingId === plan.id || sharingId === plan.id ? '...' : 'Compartir'}
                     </button>
                     {shareMenuId === plan.id && (
                       <>
@@ -231,6 +267,7 @@ export default function PlansPage() {
                       </>
                     )}
                   </div>
+
                   <button
                     onClick={() => handleDelete(plan.id)}
                     disabled={deletingId === plan.id}
@@ -240,6 +277,74 @@ export default function PlansPage() {
                     🗑️
                   </button>
                 </div>
+              </div>
+
+              {/* Trainer note */}
+              <div className="mt-3 pt-3 border-t border-border/40">
+                {editingNoteId === plan.id ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <span className="text-xs font-medium text-amber-500/80">🔒 Nota interna</span>
+                      <span className="text-xs text-text-secondary">— solo visible para vos, el alumno no la ve</span>
+                    </div>
+                    <textarea
+                      ref={noteInputRef}
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      rows={3}
+                      placeholder="Notas internas sobre este plan (lesiones, progresión, estrategia…)"
+                      className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none"
+                      style={{
+                        backgroundColor: '#1a1408',
+                        border: '1px solid #4a3a10',
+                        color: '#f5f5f5',
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') cancelNote();
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => saveNote(plan.id)}
+                        disabled={savingNoteId === plan.id}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                        style={{ backgroundColor: '#F5A623', color: '#000' }}
+                      >
+                        {savingNoteId === plan.id ? 'Guardando...' : 'Guardar nota'}
+                      </button>
+                      <button
+                        onClick={cancelNote}
+                        className="text-xs text-text-secondary hover:text-white px-3 py-1.5 rounded-lg border border-border transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                ) : plan.trainerNote ? (
+                  <button
+                    className="w-full text-left group"
+                    onClick={() => startEditNote(plan)}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="text-amber-500/60 text-xs mt-0.5 shrink-0">🔒</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-amber-500/60 mb-0.5">Nota interna · solo visible para vos</p>
+                        <p className="text-xs text-text-secondary group-hover:text-white/70 transition-colors leading-relaxed">
+                          {plan.trainerNote}
+                        </p>
+                      </div>
+                      <span className="text-text-secondary/40 text-xs shrink-0 group-hover:text-text-secondary transition-colors">✎</span>
+                    </div>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => startEditNote(plan)}
+                    className="text-xs text-text-secondary/40 hover:text-text-secondary transition-colors flex items-center gap-1.5"
+                  >
+                    <span>🔒</span>
+                    <span>+ Agregar nota interna (solo visible para vos)</span>
+                  </button>
+                )}
               </div>
             </div>
           ))}
