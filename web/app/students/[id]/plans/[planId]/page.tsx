@@ -461,13 +461,15 @@ function ExerciseCard({
 
 // ─── Read-Only Day View ──────────────────────────────────────────────────────
 
-function ReadOnlyDayView({ day }: { day: PlanDay }) {
+function ReadOnlyDayView({ day, isOriginal = false }: { day: PlanDay; isOriginal?: boolean }) {
   const sortedBlocks = [...day.blocks].sort((a, b) => a.orderIndex - b.orderIndex);
   return (
     <div className="space-y-3">
-      <div className="px-3 py-2 bg-slate-500/10 border border-slate-500/20 rounded-lg text-xs text-slate-400">
-        Vista de solo lectura — plan original &quot;{day.name}&quot;
-      </div>
+      {isOriginal && (
+        <div className="px-3 py-2 bg-slate-500/10 border border-slate-500/20 rounded-lg text-xs text-slate-400">
+          Vista de solo lectura — plan original &quot;{day.name}&quot;
+        </div>
+      )}
       {sortedBlocks.map((block) => (
         <div key={block.id} className="bg-surface border border-slate-600/50 rounded-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-600/30 flex items-center gap-2">
@@ -529,6 +531,7 @@ function BlockCard({
   const [showPicker, setShowPicker] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [tempName, setTempName] = useState(block.name);
+  const [confirmDeleteBlock, setConfirmDeleteBlock] = useState(false);
 
   function handleAddExercise(exercise: Exercise) {
     const newExercise: PlanExercise = {
@@ -624,13 +627,30 @@ function BlockCard({
             </button>
           </div>
 
-          <button
-            onClick={onDelete}
-            className="text-text-secondary hover:text-red-400 transition-colors text-xs"
-            title="Eliminar bloque"
-          >
-            🗑️
-          </button>
+          {confirmDeleteBlock ? (
+            <>
+              <button
+                onClick={onDelete}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors font-medium"
+              >
+                Confirmar
+              </button>
+              <button
+                onClick={() => setConfirmDeleteBlock(false)}
+                className="text-xs text-text-secondary hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirmDeleteBlock(true)}
+              className="text-text-secondary hover:text-red-400 transition-colors text-xs"
+              title="Eliminar bloque"
+            >
+              🗑️
+            </button>
+          )}
         </div>
 
         {/* Exercises */}
@@ -697,6 +717,7 @@ function DayEditor({
 }) {
   const [editingName, setEditingName] = useState(false);
   const [tempName, setTempName] = useState(day.name);
+  const [confirmDeleteDay, setConfirmDeleteDay] = useState(false);
 
   const sortedBlocks = [...day.blocks].sort((a, b) => a.orderIndex - b.orderIndex);
 
@@ -768,13 +789,30 @@ function DayEditor({
           </button>
         )}
         {canDelete && (
-          <button
-            onClick={onDelete}
-            className="text-text-secondary hover:text-red-400 transition-colors text-xs ml-auto"
-            title="Eliminar día"
-          >
-            Eliminar día
-          </button>
+          confirmDeleteDay ? (
+            <>
+              <button
+                onClick={onDelete}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors ml-auto font-medium"
+              >
+                Confirmar eliminación
+              </button>
+              <button
+                onClick={() => setConfirmDeleteDay(false)}
+                className="text-xs text-text-secondary hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirmDeleteDay(true)}
+              className="text-text-secondary hover:text-red-400 transition-colors text-xs ml-auto"
+              title="Eliminar día"
+            >
+              Eliminar día
+            </button>
+          )
         )}
       </div>
 
@@ -828,6 +866,8 @@ export default function PlanEditorPage() {
   const [tempName, setTempName] = useState('');
   const [activeDay, setActiveDay] = useState(0);
   const [viewingOriginalDayIdx, setViewingOriginalDayIdx] = useState<number | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [showShareMenu, setShowShareMenu] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -880,6 +920,90 @@ export default function PlanEditorPage() {
   function serialisePlan(p: Plan): Plan {
     const allBlocks = (p.days ?? []).flatMap((d) => d.blocks);
     return { ...p, blocks: allBlocks };
+  }
+
+  function openPrintWindow() {
+    if (!plan) return;
+    const allDays = plan.days && plan.days.length > 0
+      ? plan.days
+      : [{ id: '__single__', name: 'Día 1', blocks: plan.blocks ?? [] }];
+
+    const buildSetSummaryText = (sets: PlanSet[], mode: SetMode): string =>
+      sets.map((s) => {
+        const r = s.targetReps;
+        const w = s.targetWeight ? ` × ${s.targetWeight}kg` : '';
+        return mode === 'seconds' ? `${r}''${w}` : `${r} reps${w}`;
+      }).join(' / ');
+
+    const daysHtml = allDays.map((day) => {
+      const sortedBlocks = [...day.blocks].sort((a, b) => a.orderIndex - b.orderIndex);
+      const blocksHtml = sortedBlocks.map((block) => {
+        const exHtml = block.exercises.map((ex) => `
+          <div class="exercise">
+            <div class="exercise-name">${ex.exerciseName}</div>
+            ${ex.sets.length > 0 ? `<div class="exercise-sets">${buildSetSummaryText(ex.sets, ex.mode)}</div>` : ''}
+            ${ex.notes ? `<div class="exercise-notes">${ex.notes}</div>` : ''}
+          </div>`).join('');
+        return `<div class="block"><div class="block-title">${block.name}</div>${exHtml}</div>`;
+      }).join('');
+      return `<div class="day"><div class="day-title">${day.name}</div>${blocksHtml}</div>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<title>${plan.name}</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:780px;margin:0 auto;padding:2rem;color:#111;}
+  h1{font-size:1.4rem;margin-bottom:0.25rem;}
+  .subtitle{color:#666;font-size:.875rem;margin-bottom:2rem;}
+  .day{margin-bottom:2rem;page-break-inside:avoid;}
+  .day-title{font-size:1.05rem;font-weight:700;border-bottom:2px solid #111;padding-bottom:.25rem;margin-bottom:1rem;}
+  .block{margin-bottom:1.25rem;}
+  .block-title{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#555;margin-bottom:.5rem;}
+  .exercise{padding:.5rem .75rem;background:#f8f8f8;border-radius:6px;margin-bottom:.5rem;}
+  .exercise-name{font-weight:600;font-size:.9rem;}
+  .exercise-sets{color:#444;font-size:.8rem;margin-top:.15rem;}
+  .exercise-notes{color:#888;font-style:italic;font-size:.78rem;margin-top:.1rem;}
+  @media print{.no-print{display:none;}}
+</style></head>
+<body>
+<button class="no-print" onclick="window.print()" style="margin-bottom:1.5rem;padding:.5rem 1.25rem;cursor:pointer;font-size:.9rem;border-radius:6px;border:1px solid #ccc;">
+  Imprimir / Guardar PDF
+</button>
+<h1>${plan.name}</h1>
+<p class="subtitle">Creado el ${new Date(plan.createdAt).toLocaleDateString('es-AR')}</p>
+${daysHtml}
+</body></html>`;
+
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+  }
+
+  function shareViaWhatsApp() {
+    if (!plan) return;
+    const allDays = plan.days && plan.days.length > 0
+      ? plan.days
+      : [{ id: '__single__', name: 'Día 1', blocks: plan.blocks ?? [] }];
+
+    let text = `*${plan.name}*\n\n`;
+    for (const day of allDays) {
+      text += `📅 *${day.name}*\n`;
+      const sortedBlocks = [...day.blocks].sort((a, b) => a.orderIndex - b.orderIndex);
+      for (const block of sortedBlocks) {
+        text += `\n_${block.name}_\n`;
+        for (const ex of block.exercises) {
+          const setsStr = ex.sets.map((s) => {
+            const r = s.mode === 'seconds' ? `${s.targetReps}''` : `${s.targetReps} reps`;
+            return s.targetWeight ? `${r} × ${s.targetWeight}kg` : r;
+          }).join(' / ');
+          text += `• ${ex.exerciseName}: ${setsStr}\n`;
+          if (ex.notes) text += `  _${ex.notes}_\n`;
+        }
+      }
+      text += '\n';
+    }
+
+    window.open(`https://wa.me/?text=${encodeURIComponent(text.trim())}`, '_blank');
+    setShowShareMenu(false);
   }
 
   const saveDraft = useCallback(async (planData: Plan) => {
@@ -1071,29 +1195,70 @@ export default function PlanEditorPage() {
             <span className="text-red-400 text-sm">Error al guardar</span>
           )}
 
-          <button
-            onClick={() => saveDraft(plan)}
-            disabled={saving}
-            className="border border-border text-text-secondary hover:text-white hover:border-white/30 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            {saving ? 'Guardando...' : 'Guardar borrador'}
-          </button>
-
-          {plan.status === 'draft' ? (
+          {/* Share button */}
+          <div className="relative">
             <button
-              onClick={() => setShowPublishConfirm(true)}
-              disabled={publishing}
-              className="bg-accent hover:bg-accent-hover text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+              onClick={() => setShowShareMenu((v) => !v)}
+              className="border border-border text-text-secondary hover:text-white hover:border-white/30 px-3 py-2 rounded-lg text-sm transition-colors"
+              title="Compartir plan"
             >
-              {publishing ? 'Publicando...' : 'Publicar'}
+              ↑ Compartir
             </button>
+            {showShareMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowShareMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 bg-surface border border-border rounded-xl shadow-xl z-50 overflow-hidden min-w-[160px]">
+                  <button
+                    onClick={() => { openPrintWindow(); setShowShareMenu(false); }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-text-secondary hover:text-white hover:bg-surface-elevated transition-colors"
+                  >
+                    🖨️ Imprimir / PDF
+                  </button>
+                  <button
+                    onClick={shareViaWhatsApp}
+                    className="w-full text-left px-4 py-2.5 text-sm text-text-secondary hover:text-white hover:bg-surface-elevated transition-colors"
+                  >
+                    📲 WhatsApp
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Edit toggle */}
+          {isEditing ? (
+            <>
+              <button
+                onClick={() => saveDraft(plan)}
+                disabled={saving}
+                className="border border-border text-text-secondary hover:text-white hover:border-white/30 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {saving ? 'Guardando...' : 'Guardar borrador'}
+              </button>
+              {plan.status === 'draft' ? (
+                <button
+                  onClick={() => setShowPublishConfirm(true)}
+                  disabled={publishing}
+                  className="bg-accent hover:bg-accent-hover text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                >
+                  {publishing ? 'Publicando...' : 'Publicar'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => saveDraft(plan)}
+                  disabled={saving}
+                  className="bg-accent hover:bg-accent-hover text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                >
+                  {saving ? 'Guardando...' : 'Guardar'}
+                </button>
+              )}
+            </>
           ) : (
             <button
-              onClick={() => saveDraft(plan)}
-              disabled={saving}
-              className="bg-accent hover:bg-accent-hover text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+              onClick={() => setIsEditing(true)}
+              className="bg-accent hover:bg-accent-hover text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
             >
-              {saving ? 'Guardando...' : 'Guardar'}
+              ✏️ Editar
             </button>
           )}
         </div>
@@ -1122,13 +1287,15 @@ export default function PlanEditorPage() {
               {day.name}
             </button>
           ))}
-          <button
-            onClick={addDay}
-            className="px-3 py-2.5 text-sm text-text-secondary hover:text-accent transition-colors -mb-px border-b-2 border-transparent whitespace-nowrap"
-            title="Agregar día"
-          >
-            + Día
-          </button>
+          {isEditing && (
+            <button
+              onClick={addDay}
+              className="px-3 py-2.5 text-sm text-text-secondary hover:text-accent transition-colors -mb-px border-b-2 border-transparent whitespace-nowrap"
+              title="Agregar día"
+            >
+              + Día
+            </button>
+          )}
 
           {/* Original plan day tabs */}
           {originalPlan?.days && originalPlan.days.length > 0 && (
@@ -1153,9 +1320,11 @@ export default function PlanEditorPage() {
         </div>
       )}
 
-      {/* Active day editor or read-only original */}
+      {/* Active day view or editor */}
       {viewingOriginalDayIdx !== null && originalPlan?.days ? (
-        <ReadOnlyDayView day={originalPlan.days[viewingOriginalDayIdx]} />
+        <ReadOnlyDayView day={originalPlan.days[viewingOriginalDayIdx]} isOriginal={true} />
+      ) : currentDay && !isEditing ? (
+        <ReadOnlyDayView day={currentDay} isOriginal={false} />
       ) : currentDay ? (
         <DayEditor
           key={currentDay.id}
