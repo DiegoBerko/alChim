@@ -82,3 +82,20 @@ export function clearActiveSession(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(ACTIVE_SESSION_KEY);
 }
+
+// ─── Goal days per week ───────────────────────────────────────────────────────
+
+export const GOAL_DAYS_KEY = 'alchim_goal_days';
+
+export function getGoalDays(): number {
+  if (typeof window === 'undefined') return 3;
+  const raw = localStorage.getItem(GOAL_DAYS_KEY);
+  if (!raw) return 3;
+  const n = parseInt(raw, 10);
+  return isNaN(n) || n < 1 || n > 7 ? 3 : n;
+}
+
+export function setGoalDays(days: number): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(GOAL_DAYS_KEY, String(days));
+}

@@ -76,6 +76,12 @@ export async function deleteStudent(id: string): Promise<void> {
   await batch.commit();
 }
 
+export async function regenerateLinkCode(studentId: string): Promise<string> {
+  const newCode = await generateUniqueCode();
+  await db.collection('students').doc(studentId).update({ linkCode: newCode });
+  return newCode;
+}
+
 export async function getStudentByLinkCode(code: string): Promise<Student | null> {
   const snap = await db
     .collection('students')

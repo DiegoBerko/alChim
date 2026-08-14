@@ -40,7 +40,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
               className="text-sm px-3 py-1 rounded-md transition-colors"
               style={{ color: '#888', border: '1px solid #2a2a2a' }}
             >
-              Salir
+              Cerrar sesión
             </button>
           </div>
           <nav

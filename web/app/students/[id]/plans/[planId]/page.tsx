@@ -868,6 +868,7 @@ export default function PlanEditorPage() {
   const [viewingOriginalDayIdx, setViewingOriginalDayIdx] = useState<number | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1201,24 +1202,51 @@ ${daysHtml}
               onClick={() => setShowShareMenu((v) => !v)}
               className="border border-border text-text-secondary hover:text-white hover:border-white/30 px-3 py-2 rounded-lg text-sm transition-colors"
               title="Compartir plan"
+              disabled={pdfLoading}
             >
-              ↑ Compartir
+              {pdfLoading ? '...' : '↑ Compartir'}
             </button>
             {showShareMenu && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowShareMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 bg-surface border border-border rounded-xl shadow-xl z-50 overflow-hidden min-w-[160px]">
-                  <button
-                    onClick={() => { openPrintWindow(); setShowShareMenu(false); }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-text-secondary hover:text-white hover:bg-surface-elevated transition-colors"
-                  >
-                    🖨️ Imprimir / PDF
-                  </button>
+                <div className="absolute right-0 top-full mt-1 bg-surface border border-border rounded-xl shadow-xl z-50 overflow-hidden min-w-[180px]">
                   <button
                     onClick={shareViaWhatsApp}
                     className="w-full text-left px-4 py-2.5 text-sm text-text-secondary hover:text-white hover:bg-surface-elevated transition-colors"
                   >
-                    📲 WhatsApp
+                    📲 WhatsApp (mensaje)
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!plan) return;
+                      setPdfLoading(true); setShowShareMenu(false);
+                      try {
+                        const { sharePlanPDF } = await import('@/lib/plan-pdf');
+                        await sharePlanPDF(plan);
+                      } finally { setPdfLoading(false); }
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-text-secondary hover:text-white hover:bg-surface-elevated transition-colors"
+                  >
+                    📤 Compartir PDF
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!plan) return;
+                      setPdfLoading(true); setShowShareMenu(false);
+                      try {
+                        const { downloadPlanPDF } = await import('@/lib/plan-pdf');
+                        await downloadPlanPDF(plan);
+                      } finally { setPdfLoading(false); }
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-text-secondary hover:text-white hover:bg-surface-elevated transition-colors"
+                  >
+                    📄 Descargar PDF
+                  </button>
+                  <button
+                    onClick={() => { openPrintWindow(); setShowShareMenu(false); }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-text-secondary hover:text-white hover:bg-surface-elevated transition-colors"
+                  >
+                    🖨️ Imprimir
                   </button>
                 </div>
               </>

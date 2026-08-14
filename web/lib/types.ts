@@ -100,6 +100,7 @@ export interface SessionSet {
   actualWeight?: number;
   done: boolean;
   effort?: EffortLevel;
+  omitted?: boolean;
 }
 
 export interface SessionExercise {

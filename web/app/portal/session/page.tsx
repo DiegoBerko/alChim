@@ -385,16 +385,30 @@ function ExerciseCard({
   onUpdateNote,
   onUpdateEffort,
   onToggleDone,
+  onOmitSet,
+  onRestoreSet,
 }: {
   exercise: SessionExercise;
   onUpdateSet: (si: number, u: Partial<SessionSet>) => void;
   onUpdateNote: (note: string) => void;
   onUpdateEffort: (effort: EffortLevel | undefined) => void;
   onToggleDone: () => void;
+  onOmitSet: (si: number) => void;
+  onRestoreSet: (si: number) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [pendingOmitSi, setPendingOmitSi] = useState<number | null>(null);
   const isDone = !!exercise.done;
+
+  const activeSets = exercise.sets.filter((s) => !s.omitted);
+  const omittedSets = exercise.sets.filter((s) => s.omitted);
+  const lastActiveSi = activeSets.length > 0
+    ? exercise.sets.indexOf(activeSets[activeSets.length - 1])
+    : -1;
+  const firstOmittedSi = omittedSets.length > 0
+    ? exercise.sets.indexOf(omittedSets[0])
+    : -1;
 
   // Auto-collapse on done
   useEffect(() => { if (isDone) setCollapsed(true); }, [isDone]);
@@ -473,14 +487,77 @@ function ExerciseCard({
 
           {/* Set rows */}
           <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-            {exercise.sets.map((set, si) => (
-              <SetRow
-                key={set.setNumber}
-                set={set}
-                disabled={false}
-                onUpdate={(u) => onUpdateSet(si, u)}
-              />
-            ))}
+            {exercise.sets.map((set, si) => {
+              const isOmitted = !!set.omitted;
+              const isLastActive = si === lastActiveSi;
+              const isFirstOmitted = si === firstOmittedSi;
+
+              if (isOmitted) {
+                return (
+                  <div key={set.setNumber} className="flex items-center gap-2 py-1.5 opacity-40">
+                    <span className="w-6 text-center text-xs font-bold shrink-0" style={{ color: '#555' }}>
+                      S{set.setNumber}
+                    </span>
+                    <span className="flex-1 text-xs line-through" style={{ color: '#555' }}>
+                      {set.targetReps} {set.mode === 'seconds' ? 'seg' : 'reps'}
+                      {set.targetWeight ? ` × ${set.targetWeight}kg` : ''}
+                      {' · omitida'}
+                    </span>
+                    {isFirstOmitted && (
+                      <button
+                        onClick={() => onRestoreSet(si)}
+                        className="text-xs px-2 py-0.5 rounded shrink-0 transition-colors"
+                        style={{ color: '#F5A623', border: '1px solid #F5A62360' }}
+                        title="Restaurar serie"
+                      >
+                        ↩
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div key={set.setNumber} className="flex items-center gap-1">
+                  <div className="flex-1">
+                    <SetRow
+                      set={set}
+                      disabled={false}
+                      onUpdate={(u) => onUpdateSet(si, u)}
+                    />
+                  </div>
+                  {isLastActive && activeSets.length > 0 && (
+                    pendingOmitSi === si ? (
+                      <div className="flex items-center gap-1 shrink-0 pl-1">
+                        <button
+                          onClick={() => { onOmitSet(si); setPendingOmitSi(null); }}
+                          className="text-xs px-2 py-1 rounded font-semibold shrink-0"
+                          style={{ backgroundColor: '#ef444430', color: '#ef4444', border: '1px solid #ef444460' }}
+                        >
+                          Omitir
+                        </button>
+                        <button
+                          onClick={() => setPendingOmitSi(null)}
+                          className="text-xs px-1.5 py-1 rounded shrink-0"
+                          style={{ color: '#555' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setPendingOmitSi(si)}
+                        className="text-xs px-2 py-1 rounded shrink-0 transition-colors ml-1"
+                        style={{ color: '#444', border: '1px solid #333' }}
+                        title="Omitir esta serie"
+                      >
+                        –
+                      </button>
+                    )
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Footer */}
@@ -730,11 +807,9 @@ function SessionPageInner() {
   const [showFinish, setShowFinish] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [showSaved, setShowSaved] = useState(false);
   const [showDiscard, setShowDiscard] = useState(false);
   const [finishElapsed, setFinishElapsed] = useState<number | null>(null);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savedIndicatorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userChangedRef = useRef(false);
 
   // ── Wake Lock ────────────────────────────────────────────────────────────
@@ -805,11 +880,6 @@ function SessionPageInner() {
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
       saveActiveSession(session);
-      if (userChangedRef.current) {
-        setShowSaved(true);
-        if (savedIndicatorTimer.current) clearTimeout(savedIndicatorTimer.current);
-        savedIndicatorTimer.current = setTimeout(() => setShowSaved(false), 2000);
-      }
     }, 500);
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
   }, [session]);
@@ -893,6 +963,48 @@ function SessionPageInner() {
                 sets: ex.sets.map((s) => ({ ...s, done: nowDone })),
               };
             }),
+          }
+        ),
+      };
+    });
+  }, []);
+
+  const omitSet = useCallback((bi: number, ei: number, si: number) => {
+    userChangedRef.current = true;
+    setSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        blocks: prev.blocks.map((b, bIdx) =>
+          bIdx !== bi ? b : {
+            ...b,
+            exercises: b.exercises.map((ex, eIdx) =>
+              eIdx !== ei ? ex : {
+                ...ex,
+                sets: ex.sets.map((s, sIdx) => sIdx !== si ? s : { ...s, omitted: true }),
+              }
+            ),
+          }
+        ),
+      };
+    });
+  }, []);
+
+  const restoreSet = useCallback((bi: number, ei: number, si: number) => {
+    userChangedRef.current = true;
+    setSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        blocks: prev.blocks.map((b, bIdx) =>
+          bIdx !== bi ? b : {
+            ...b,
+            exercises: b.exercises.map((ex, eIdx) =>
+              eIdx !== ei ? ex : {
+                ...ex,
+                sets: ex.sets.map((s, sIdx) => sIdx !== si ? s : { ...s, omitted: false }),
+              }
+            ),
           }
         ),
       };
@@ -1013,9 +1125,6 @@ function SessionPageInner() {
               <p className="text-xs truncate" style={{ color: '#888' }}>{session.dayName}</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {showSaved && (
-                <span className="text-xs font-medium" style={{ color: '#22c55e' }}>✓ Guardado</span>
-              )}
               {session.pausedAt ? (
                 <button onClick={handleResume}
                   className="px-3 py-2 rounded-xl text-sm font-bold"
@@ -1084,6 +1193,8 @@ function SessionPageInner() {
                   onUpdateNote={(note) => updateNote(bi, ei, note)}
                   onUpdateEffort={(effort) => updateEffort(bi, ei, effort)}
                   onToggleDone={() => toggleExDone(bi, ei)}
+                  onOmitSet={(si) => omitSet(bi, ei, si)}
+                  onRestoreSet={(si) => restoreSet(bi, ei, si)}
                 />
               ))}
             </div>

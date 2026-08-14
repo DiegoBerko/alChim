@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Plan, PlanDay, GymSession } from '@/lib/types';
-import { getPortalCode, getActiveSession } from '@/lib/student-session';
+import { getPortalCode, getActiveSession, getGoalDays, setGoalDays } from '@/lib/student-session';
 
 interface StudentInfo {
   name: string;
@@ -14,7 +14,6 @@ function normalizePlanDays(plan: Plan): PlanDay[] {
   if (plan.days && plan.days.length > 0) {
     return plan.days;
   }
-  // Wrap blocks into a single synthetic day
   return [
     {
       id: '__single__',
@@ -40,6 +39,48 @@ function calcStreak(sessions: GymSession[]): number {
   return streak;
 }
 
+function calcWeeklyCount(sessions: GymSession[]): number {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const uniqueDates = new Set(
+    sessions
+      .filter((s) => s.startedAt.slice(0, 10) >= sevenDaysAgo)
+      .map((s) => s.startedAt.slice(0, 10))
+  );
+  return uniqueDates.size;
+}
+
+function GoalPicker({ goal, onChange, onClose }: { goal: number; onChange: (n: number) => void; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
+      onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl p-5 space-y-4" style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-sm" style={{ color: '#f5f5f5' }}>Meta semanal</h3>
+          <button onClick={onClose} style={{ color: '#888' }}>✕</button>
+        </div>
+        <p className="text-xs" style={{ color: '#888' }}>¿Cuántos días por semana querés entrenar?</p>
+        <div className="flex gap-2 justify-between">
+          {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+            <button
+              key={n}
+              onClick={() => { onChange(n); onClose(); }}
+              className="flex-1 py-3 rounded-xl font-bold text-sm transition-colors"
+              style={{
+                backgroundColor: n === goal ? '#F5A623' : '#242424',
+                color: n === goal ? '#0D0D0D' : '#f5f5f5',
+                border: n === goal ? 'none' : '1px solid #333',
+              }}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PlansPage() {
   const router = useRouter();
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -48,7 +89,13 @@ export default function PlansPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<ReturnType<typeof getActiveSession>>(null);
-  const [sessionStats, setSessionStats] = useState<{ total: number; streak: number } | null>(null);
+  const [sessionStats, setSessionStats] = useState<{ total: number; streak: number; weeklyCount: number } | null>(null);
+  const [goal, setGoal] = useState(3);
+  const [showGoalPicker, setShowGoalPicker] = useState(false);
+
+  useEffect(() => {
+    setGoal(getGoalDays());
+  }, []);
 
   useEffect(() => {
     const code = getPortalCode();
@@ -75,7 +122,11 @@ export default function PlansPage() {
       .then((r) => r.json())
       .then((data: { sessions: GymSession[] }) => {
         const sessions = data.sessions ?? [];
-        setSessionStats({ total: sessions.length, streak: calcStreak(sessions) });
+        setSessionStats({
+          total: sessions.length,
+          streak: calcStreak(sessions),
+          weeklyCount: calcWeeklyCount(sessions),
+        });
       })
       .catch(() => {/* stats are optional */});
 
@@ -83,6 +134,11 @@ export default function PlansPage() {
       .catch(() => setError('No se pudo cargar los planes. Intentá de nuevo.'))
       .finally(() => setLoading(false));
   }, [router]);
+
+  function handleGoalChange(n: number) {
+    setGoal(n);
+    setGoalDays(n);
+  }
 
   function handleDaySelect(plan: Plan, day: PlanDay) {
     const params = new URLSearchParams({
@@ -136,8 +192,14 @@ export default function PlansPage() {
     );
   }
 
+  const weekMet = sessionStats ? sessionStats.weeklyCount >= goal : false;
+
   return (
     <div className="space-y-6">
+      {showGoalPicker && (
+        <GoalPicker goal={goal} onChange={handleGoalChange} onClose={() => setShowGoalPicker(false)} />
+      )}
+
       {student && (
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -148,18 +210,39 @@ export default function PlansPage() {
               Elegí un plan y día para entrenar
             </p>
           </div>
-          {sessionStats && sessionStats.total > 0 && (
-            <div className="flex items-center gap-3 shrink-0 pt-1">
-              {sessionStats.streak > 0 && (
-                <div className="text-right">
-                  <p className="text-lg font-bold leading-none" style={{ color: '#F5A623' }}>
-                    {sessionStats.streak} 🔥
-                  </p>
-                  <p className="text-xs mt-0.5" style={{ color: '#888' }}>
-                    {sessionStats.streak === 1 ? 'día' : 'días'}
-                  </p>
-                </div>
-              )}
+          <div className="flex items-center gap-3 shrink-0 pt-1">
+            {/* Weekly goal badge */}
+            {sessionStats !== null && (
+              <button
+                onClick={() => setShowGoalPicker(true)}
+                className="text-right"
+                title="Cambiar meta semanal"
+              >
+                <p
+                  className="text-lg font-bold leading-none"
+                  style={{ color: weekMet ? '#22c55e' : '#F5A623' }}
+                >
+                  {sessionStats.weeklyCount}/{goal} {weekMet ? '✓' : ''}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: '#888' }}>
+                  esta semana
+                </p>
+              </button>
+            )}
+
+            {/* Daily streak */}
+            {sessionStats && sessionStats.streak > 0 && (
+              <div className="text-right">
+                <p className="text-lg font-bold leading-none" style={{ color: '#F5A623' }}>
+                  {sessionStats.streak} 🔥
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: '#888' }}>
+                  {sessionStats.streak === 1 ? 'día' : 'días'}
+                </p>
+              </div>
+            )}
+
+            {sessionStats && sessionStats.total > 0 && (
               <div className="text-right">
                 <p className="text-lg font-bold leading-none" style={{ color: '#f5f5f5' }}>
                   {sessionStats.total}
@@ -168,8 +251,8 @@ export default function PlansPage() {
                   {sessionStats.total === 1 ? 'sesión' : 'sesiones'}
                 </p>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
