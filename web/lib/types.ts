@@ -43,6 +43,7 @@ export interface Exercise {
   category: 'fuerza' | 'cardio' | 'peso_corporal';
   muscleGroups: string[];
   met: number;
+  videoUrl?: string;
 }
 
 export interface PlanSet {
@@ -60,6 +61,7 @@ export interface PlanExercise {
   notes?: string;
   mode: SetMode;
   sets: PlanSet[];
+  videoUrl?: string;
 }
 
 export interface PlanBlock {
@@ -112,6 +114,7 @@ export interface SessionExercise {
   sets: SessionSet[];
   studentNote: string;
   done?: boolean;
+  videoUrl?: string;
 }
 
 export interface SessionBlock {
@@ -119,6 +122,14 @@ export interface SessionBlock {
   name: string;
   orderIndex: number;
   exercises: SessionExercise[];
+}
+
+export interface StudentFeedback {
+  id: string;
+  studentId: string;
+  content: string;
+  createdAt: string;
+  read: boolean;
 }
 
 export interface GymSession {

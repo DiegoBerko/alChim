@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import type { Student, StudentNote, StudentAspect, Payment, Exercise, Plan, PlanDay, PlanBlock, GymSession } from './types';
+import type { Student, StudentNote, StudentAspect, Payment, Exercise, Plan, PlanDay, PlanBlock, GymSession, StudentFeedback } from './types';
 
 // ─── Link Code Generation ───────────────────────────────────────────────────
 
@@ -216,6 +216,10 @@ export async function deleteExercise(id: string): Promise<void> {
   await db.collection('exercises').doc(id).delete();
 }
 
+export async function updateExercise(id: string, data: Partial<Omit<Exercise, 'id'>>): Promise<void> {
+  await db.collection('exercises').doc(id).update(data as FirebaseFirestore.UpdateData<Record<string, unknown>>);
+}
+
 export async function seedDefaultExercises(): Promise<void> {
   const snap = await db.collection('exercises').limit(1).get();
   if (!snap.empty) return;
@@ -325,6 +329,33 @@ export async function getGymSessions(studentId: string): Promise<GymSession[]> {
     .orderBy('startedAt', 'desc')
     .get();
   return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as GymSession));
+}
+
+// ─── Feedback / Consultas ─────────────────────────────────────────────────────
+
+export async function getFeedback(studentId: string): Promise<StudentFeedback[]> {
+  const snap = await db
+    .collection('students')
+    .doc(studentId)
+    .collection('feedback')
+    .orderBy('createdAt', 'asc')
+    .get();
+  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as StudentFeedback));
+}
+
+export async function addFeedback(studentId: string, content: string): Promise<StudentFeedback> {
+  const payload = { studentId, content, createdAt: new Date().toISOString(), read: false };
+  const ref = await db.collection('students').doc(studentId).collection('feedback').add(payload);
+  return { id: ref.id, ...payload };
+}
+
+export async function markFeedbackRead(studentId: string, feedbackId: string): Promise<void> {
+  await db
+    .collection('students')
+    .doc(studentId)
+    .collection('feedback')
+    .doc(feedbackId)
+    .update({ read: true });
 }
 
 export async function updateGymSession(

@@ -53,6 +53,9 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
             <NavLink href="/portal/history" current={pathname}>
               Historial
             </NavLink>
+            <NavLink href="/portal/feedback" current={pathname}>
+              Consultas
+            </NavLink>
           </nav>
         </header>
       )}

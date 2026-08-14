@@ -24,6 +24,7 @@ const styles = StyleSheet.create({
   exerciseName: { fontSize: 10, fontWeight: 'bold' },
   exerciseSets: { fontSize: 9, color: '#444', marginTop: 2 },
   exerciseNotes: { fontSize: 8, color: '#999', fontStyle: 'italic', marginTop: 2 },
+  exerciseVideo: { fontSize: 7, color: '#aaa', marginTop: 2 },
 });
 
 function formatSets(sets: PlanSet[], mode: SetMode): string {
@@ -67,6 +68,9 @@ function PlanDocument({ plan }: { plan: Plan }) {
                       )}
                       {ex.notes && (
                         <Text style={styles.exerciseNotes}>{ex.notes}</Text>
+                      )}
+                      {ex.videoUrl && (
+                        <Text style={styles.exerciseVideo}>{ex.videoUrl}</Text>
                       )}
                     </View>
                   ))}

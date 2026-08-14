@@ -2,8 +2,56 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Plan, PlanDay, GymSession } from '@/lib/types';
+import type { Plan, PlanDay, GymSession, PlanExercise } from '@/lib/types';
 import { getPortalCode, getActiveSession, getGoalDays, setGoalDays } from '@/lib/student-session';
+
+// ─── Video Modal ──────────────────────────────────────────────────────────────
+
+function VideoModal({ url, name, onClose }: { url: string; name: string; onClose: () => void }) {
+  const driveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  const embedUrl = driveMatch ? `https://drive.google.com/file/d/${driveMatch[1]}/preview` : null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.95)' }}>
+      <div className="w-full max-w-lg rounded-2xl overflow-hidden" style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #2a2a2a' }}>
+          <span className="font-semibold text-sm truncate pr-4" style={{ color: '#f5f5f5' }}>{name}</span>
+          <button onClick={onClose} className="shrink-0 text-lg" style={{ color: '#888' }}>✕</button>
+        </div>
+        {embedUrl ? (
+          <iframe src={embedUrl} className="w-full" style={{ aspectRatio: '16/9' }} allow="autoplay" allowFullScreen />
+        ) : (
+          <div className="p-6 text-center">
+            <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium" style={{ color: '#F5A623' }}>
+              Abrir video →
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Exercise Video Button ────────────────────────────────────────────────────
+
+function ExerciseVideoButton({ exercise }: { exercise: PlanExercise }) {
+  const [showVideo, setShowVideo] = useState(false);
+  if (!exercise.videoUrl) return null;
+  return (
+    <>
+      <button
+        onClick={() => setShowVideo(true)}
+        className="shrink-0 text-xs px-2 py-1 rounded-md"
+        style={{ backgroundColor: '#242424', color: '#F5A623', border: '1px solid #333' }}
+        title="Ver video"
+      >
+        ▶
+      </button>
+      {showVideo && (
+        <VideoModal url={exercise.videoUrl!} name={exercise.exerciseName} onClose={() => setShowVideo(false)} />
+      )}
+    </>
+  );
+}
 
 interface StudentInfo {
   name: string;

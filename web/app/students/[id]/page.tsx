@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import type { Student, StudentNote, StudentAspect, Payment, Plan, GymSession } from '@/lib/types';
+import type { Student, StudentNote, StudentAspect, Payment, Plan, GymSession, StudentFeedback } from '@/lib/types';
 
-type Tab = 'perfil' | 'pagos' | 'notas-lesiones' | 'planes' | 'historial';
+type Tab = 'perfil' | 'pagos' | 'notas-lesiones' | 'planes' | 'historial' | 'consultas';
 
 const MONTHS = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -1072,6 +1072,119 @@ function HistoryTab({ studentId }: { studentId: string }) {
   );
 }
 
+// ─── Consultas Tab ───────────────────────────────────────────────────────────
+
+function ConsultasTab({ studentId }: { studentId: string }) {
+  const [items, setItems] = useState<StudentFeedback[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [markingId, setMarkingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/students/${studentId}/feedback`)
+      .then((r) => r.json())
+      .then((data) => {
+        setItems(data.feedback ?? []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [studentId]);
+
+  async function handleMarkRead(id: string) {
+    setMarkingId(id);
+    const res = await fetch(`/api/students/${studentId}/feedback`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedbackId: id }),
+    });
+    if (res.ok) {
+      setItems((prev) => prev.map((m) => m.id === id ? { ...m, read: true } : m));
+    }
+    setMarkingId(null);
+  }
+
+  if (loading) {
+    return <p className="text-text-secondary text-sm">Cargando consultas...</p>;
+  }
+
+  const unread = items.filter((m) => !m.read);
+  const read = items.filter((m) => m.read);
+
+  if (items.length === 0) {
+    return (
+      <p className="text-text-secondary text-sm py-4">
+        El alumno todavía no envió ninguna consulta.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {unread.length > 0 && (
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-accent mb-3">
+            Sin leer ({unread.length})
+          </p>
+          <div className="space-y-2">
+            {unread.map((msg) => (
+              <div
+                key={msg.id}
+                className="bg-surface border border-accent/40 rounded-xl px-4 py-3"
+              >
+                <p className="text-sm text-white leading-relaxed">{msg.content}</p>
+                <div className="flex items-center justify-between mt-2 gap-3">
+                  <p className="text-xs text-text-secondary">
+                    {new Date(msg.createdAt).toLocaleDateString('es-AR', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                  <button
+                    onClick={() => handleMarkRead(msg.id)}
+                    disabled={markingId === msg.id}
+                    className="text-xs text-accent hover:underline disabled:opacity-50"
+                  >
+                    {markingId === msg.id ? '...' : 'Marcar como leído'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {read.length > 0 && (
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-3">
+            Leídas ({read.length})
+          </p>
+          <div className="space-y-2">
+            {read.map((msg) => (
+              <div
+                key={msg.id}
+                className="bg-surface border border-border rounded-xl px-4 py-3"
+              >
+                <p className="text-sm text-text-secondary leading-relaxed">{msg.content}</p>
+                <p className="text-xs text-text-secondary/50 mt-2">
+                  {new Date(msg.createdAt).toLocaleDateString('es-AR', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function StudentDetailPage() {
@@ -1117,6 +1230,7 @@ export default function StudentDetailPage() {
     { id: 'notas-lesiones', label: 'Notas y Lesiones' },
     { id: 'planes', label: 'Planes' },
     { id: 'historial', label: 'Historial' },
+    { id: 'consultas', label: 'Consultas' },
   ];
 
   return (
@@ -1172,6 +1286,7 @@ export default function StudentDetailPage() {
       {activeTab === 'notas-lesiones' && <NotasLesionesTab studentId={studentId} />}
       {activeTab === 'planes' && <PlansTab studentId={studentId} />}
       {activeTab === 'historial' && <HistoryTab studentId={studentId} />}
+      {activeTab === 'consultas' && <ConsultasTab studentId={studentId} />}
     </div>
   );
 }

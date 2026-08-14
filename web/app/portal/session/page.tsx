@@ -67,6 +67,7 @@ function buildSessionFromDay(planId: string, planName: string, day: PlanDay): Ac
             orderIndex: ex.orderIndex,
             mode: ex.mode,
             notes: ex.notes,
+            videoUrl: ex.videoUrl,
             studentNote: '',
             done: false,
             sets: ex.sets.map((s) => ({
@@ -96,6 +97,32 @@ function calcElapsed(session: ActiveSession): number {
     return Math.floor((session.pausedAt - session.startedAt - pausedMs) / 1000);
   }
   return Math.floor((Date.now() - session.startedAt - pausedMs) / 1000);
+}
+
+// ─── Video Modal ──────────────────────────────────────────────────────────────
+
+function VideoModal({ url, name, onClose }: { url: string; name: string; onClose: () => void }) {
+  const driveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  const embedUrl = driveMatch ? `https://drive.google.com/file/d/${driveMatch[1]}/preview` : null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.95)' }}>
+      <div className="w-full max-w-lg rounded-2xl overflow-hidden" style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #2a2a2a' }}>
+          <span className="font-semibold text-sm truncate pr-4" style={{ color: '#f5f5f5' }}>{name}</span>
+          <button onClick={onClose} className="shrink-0 text-lg" style={{ color: '#888' }}>✕</button>
+        </div>
+        {embedUrl ? (
+          <iframe src={embedUrl} className="w-full" style={{ aspectRatio: '16/9' }} allow="autoplay" allowFullScreen />
+        ) : (
+          <div className="p-6 text-center">
+            <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium" style={{ color: '#F5A623' }}>
+              Abrir video →
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── Plan Preview ─────────────────────────────────────────────────────────────
@@ -146,6 +173,7 @@ function PlanPreview({
                 orderIndex: ex.orderIndex,
                 mode: ex.mode,
                 notes: ex.notes,
+                videoUrl: ex.videoUrl,
                 studentNote: '',
                 done: false,
                 sets: ex.sets.map((s) => ({
@@ -246,7 +274,21 @@ function PlanPreview({
                 {block.exercises.map((ex) => (
                   <div key={ex.planExerciseId} className="rounded-xl px-4 py-3"
                     style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
-                    <p className="text-sm font-medium mb-2" style={{ color: '#888' }}>{ex.exerciseName}</p>
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-sm font-medium flex-1" style={{ color: '#888' }}>{ex.exerciseName}</p>
+                      {ex.videoUrl && (
+                        <a
+                          href={ex.videoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 text-xs px-2 py-1 rounded-md"
+                          style={{ backgroundColor: '#242424', color: '#F5A623', border: '1px solid #333' }}
+                          title="Ver video"
+                        >
+                          ▶
+                        </a>
+                      )}
+                    </div>
                     <div className="space-y-1">
                       {ex.sets.map((s) => (
                         <p key={s.setNumber} className="text-xs" style={{ color: '#555' }}>
@@ -399,6 +441,7 @@ function ExerciseCard({
   const [collapsed, setCollapsed] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [pendingOmitSi, setPendingOmitSi] = useState<number | null>(null);
+  const [showVideo, setShowVideo] = useState(false);
   const isDone = !!exercise.done;
 
   const activeSets = exercise.sets.filter((s) => !s.omitted);
@@ -458,6 +501,18 @@ function ExerciseCard({
           )}
         </div>
 
+        {/* Video button */}
+        {exercise.videoUrl && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowVideo(true); }}
+            className="shrink-0 text-xs px-2 py-1 rounded-md"
+            style={{ backgroundColor: '#242424', color: '#F5A623', border: '1px solid #333' }}
+            title="Ver video"
+          >
+            ▶
+          </button>
+        )}
+
         {/* Done button */}
         <button
           onClick={(e) => { e.stopPropagation(); onToggleDone(); }}
@@ -472,6 +527,11 @@ function ExerciseCard({
           {isDone ? '✓' : '○'}
         </button>
       </div>
+
+      {/* Video modal */}
+      {showVideo && exercise.videoUrl && (
+        <VideoModal url={exercise.videoUrl} name={exercise.exerciseName} onClose={() => setShowVideo(false)} />
+      )}
 
       {/* Body — hidden when collapsed or done */}
       {!collapsed && !isDone && (

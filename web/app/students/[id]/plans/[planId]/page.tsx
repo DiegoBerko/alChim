@@ -545,6 +545,7 @@ function BlockCard({
         { setNumber: 2, targetReps: '10', mode: 'reps' },
         { setNumber: 3, targetReps: '10', mode: 'reps' },
       ],
+      ...(exercise.videoUrl ? { videoUrl: exercise.videoUrl } : {}),
     };
     onUpdate({ ...block, exercises: [...block.exercises, newExercise] });
     setShowPicker(false);
